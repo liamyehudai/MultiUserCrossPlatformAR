@@ -39,10 +39,11 @@
 
     /**
      * ============================================================================
-     * SECTION 1: Platform Gating (iOS Check)
+     * SECTION 1: Platform Gating & WebXR Capability Detection
      * ============================================================================
      * Apple restricts the standard WebXR Device API on Mobile Safari.
-     * We immediately check for iOS/iPadOS user agents and halt execution if detected.
+     * We check for iOS/iPadOS user agents, but auto-detect WebXR-capable browsers
+     * (e.g., Mozilla WebXR Viewer, XR Browser) and provide a manual bypass.
      */
     function isIOSDevice() {
         const userAgent = window.navigator.userAgent || '';
@@ -51,10 +52,61 @@
         return isIOS || isIPadOS;
     }
 
-    function renderIOSRestrictionUI() {
+    function isWebXRSupportedOrBypassed() {
+        // 1. Check for explicit URL query parameter bypass (?xr=1, ?bypass=1, ?bypass_ios=1)
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('xr') || urlParams.has('bypass') || urlParams.has('bypass_ios')) {
+            return true;
+        }
+
+        // 2. Check for session storage bypass flag
+        if (sessionStorage.getItem('bypass_ios_xr_check') === 'true') {
+            return true;
+        }
+
+        // 3. Check for known WebXR browser user-agent identifiers
+        const userAgent = window.navigator.userAgent || '';
+        if (/WebXRViewer|WebXR|XRBrowser|MozillaWebXR/i.test(userAgent)) {
+            return true;
+        }
+
+        // 4. Check for WebXR API availability on window or navigator
+        if ('xr' in navigator && navigator.xr) {
+            return true;
+        }
+        if (window.WebXR || window.WebXRPolyfill) {
+            return true;
+        }
+
+        return false;
+    }
+
+    async function checkShouldShowIOSRestriction() {
+        if (!isIOSDevice()) {
+            return false; // Non-iOS device, proceed directly
+        }
+
+        if (isWebXRSupportedOrBypassed()) {
+            return false; // iOS device running a recognized WebXR browser or bypassed
+        }
+
+        // Probing for immersive-ar session support if navigator.xr exists
+        if ('xr' in navigator && navigator.xr && typeof navigator.xr.isSessionSupported === 'function') {
+            try {
+                const supported = await navigator.xr.isSessionSupported('immersive-ar');
+                if (supported) return false;
+            } catch (e) {
+                console.warn("Error probing WebXR session support:", e);
+            }
+        }
+
+        return true; // iOS device running standard Safari without WebXR
+    }
+
+    function renderIOSRestrictionUI(onBypassCallback) {
         const currentUrl = window.location.href;
         uiContainer.innerHTML = `
-            <div class="modal-overlay">
+            <div class="modal-overlay" id="iosModal">
                 <div class="ios-card">
                     <div class="ios-icon">
                         <svg viewBox="0 0 24 24">
@@ -66,14 +118,23 @@
                         Apple Mobile Safari restricts the standard WebXR API required for spatial camera image tracking.
                     </p>
                     <div class="ios-instructions">
-                        <strong>To run this Shared AR experience on iOS:</strong>
+                        <strong>To run Shared AR on iOS:</strong>
                         <ol>
                             <li>Download <strong>Mozilla WebXR Viewer</strong> or <strong>XR Browser</strong> from the App Store.</li>
-                            <li>Copy the URL below and paste it into the WebXR browser address bar.</li>
+                            <li>Copy the URL below and paste it into your WebXR browser address bar.</li>
                         </ol>
                         <div class="copy-box">
                             <input type="text" readonly value="${currentUrl}" class="copy-input" id="urlInput">
-                            <button class="btn-secondary" style="width: auto; padding: 6px 14px;" id="copyBtn">Copy</button>
+                            <button class="btn-secondary" style="width: auto; padding: 6px 14px;" id="copyBtn">Copy Link</button>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px;">
+                        <button class="btn-primary" id="bypassIOSBtn">
+                            🚀 I'm using a WebXR Browser — Launch AR
+                        </button>
+                        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">
+                            Already in XR Browser or WebXR Viewer? Tap above to launch directly.
                         </div>
                     </div>
                 </div>
@@ -87,7 +148,15 @@
                 navigator.clipboard.writeText(input.value);
                 const btn = document.getElementById('copyBtn');
                 btn.textContent = 'Copied!';
-                setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+                setTimeout(() => { btn.textContent = 'Copy Link'; }, 2000);
+            }
+        });
+
+        document.getElementById('bypassIOSBtn')?.addEventListener('click', () => {
+            sessionStorage.setItem('bypass_ios_xr_check', 'true');
+            uiContainer.innerHTML = '';
+            if (typeof onBypassCallback === 'function') {
+                onBypassCallback();
             }
         });
     }
@@ -548,12 +617,19 @@
      * ============================================================================
      */
     async function initApp() {
-        // 1. Check iOS Platform Restriction
-        if (isIOSDevice()) {
-            renderIOSRestrictionUI();
+        // 1. Check iOS Platform Restriction vs WebXR capabilities / bypass
+        const showRestriction = await checkShouldShowIOSRestriction();
+        if (showRestriction) {
+            renderIOSRestrictionUI(() => {
+                startMainApp();
+            });
             return;
         }
 
+        await startMainApp();
+    }
+
+    async function startMainApp() {
         // 2. Perform Network Time Synchronization
         await synchronizeClock();
 
