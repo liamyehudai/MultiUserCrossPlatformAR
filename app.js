@@ -562,10 +562,12 @@
                         images: [
                             {
                                 src: 'marker.png',
-                                estimatedRealWorldWidth: 0.2 // 20cm expected marker width
+                                // 20cm expected marker width
+                                estimatedRealWorldWidth: 0.2
                             }
                         ]
-                    }
+                    },
+                    false // <--- REQUIRED = FALSE (Marks this feature as optional in the WebXR session request)
                 );
                 console.log("WebXR Image Tracking module successfully enabled.");
             } catch (imageTrackingErr) {
@@ -579,7 +581,9 @@
             // Handle WebXR session state changes
             xrExperience.baseExperience.onStateChangedObservable.add((state) => {
                 if (state === BABYLON.WebXRState.IN_XR) {
-                    if (imageTracking) {
+                    // Check if image tracking feature is actually supported and attached to the session
+                    const isImageTrackingAttached = imageTracking && imageTracking.attached;
+                    if (isImageTrackingAttached) {
                         markerRoot.setEnabled(false); // Hide 3D scene until camera locates image marker
                         updateTrackingStatusBadge("Searching for Marker...", "searching");
                     } else {
@@ -605,6 +609,9 @@
             if (imageTracking) {
                 // Handle Tracked Image Position/Orientation Matrix Updates
                 imageTracking.onTrackedImageUpdatedObservable.add((trackedImage) => {
+                    // Only process matrix if image tracking is attached and active
+                    if (!imageTracking.attached) return;
+
                     // Decompose transformation matrix to update 3D anchor position and rotation
                     if (trackedImage && trackedImage.transformationMatrix) {
                         trackedImage.transformationMatrix.decompose(
