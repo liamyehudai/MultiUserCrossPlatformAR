@@ -17,6 +17,65 @@
 (function () {
     'use strict';
 
+    // Diagnostic Console Log Buffer for debugging WebXR on Meta Quest & mobile devices
+    const logBuffer = [];
+    
+    function captureLog(type, args) {
+        const message = args.map(arg => {
+            if (arg instanceof Error) {
+                return `${arg.name}: ${arg.message}\n${arg.stack}`;
+            } else if (typeof arg === 'object') {
+                try {
+                    return JSON.stringify(arg);
+                } catch (e) {
+                    return String(arg);
+                }
+            }
+            return String(arg);
+        }).join(' ');
+
+        logBuffer.push({
+            timestamp: new Date().toLocaleTimeString(),
+            type: type,
+            message: message
+        });
+
+        // Keep last 150 log messages
+        if (logBuffer.length > 150) {
+            logBuffer.shift();
+        }
+
+        // Live-update log display if currently visible
+        updateLogConsoleDisplay();
+        updateLogBadgeUI();
+    }
+
+    // Intercept default console logging to pipe into our system diagnostic buffer
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const originalError = console.error;
+
+    console.log = (...args) => {
+        originalLog.apply(console, args);
+        captureLog('info', args);
+    };
+    console.warn = (...args) => {
+        originalWarn.apply(console, args);
+        captureLog('warn', args);
+    };
+    console.error = (...args) => {
+        originalError.apply(console, args);
+        captureLog('error', args);
+    };
+
+    // Catch unhandled exceptions and promise rejections
+    window.addEventListener('error', (event) => {
+        captureLog('error', [event.error || event.message]);
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+        captureLog('error', [`Unhandled Promise Rejection: ${event.reason}`]);
+    });
+
     // Application State Variables
     let timeOffset = 0;           // Milliseconds to add to Date.now()
     let timeSyncLatency = 0;      // Network Round-Trip Time in ms
@@ -483,6 +542,7 @@
 
         try {
             xrExperience = await scene.createDefaultXRExperienceAsync({
+                disableDefaultUI: true,
                 uiOptions: {
                     sessionMode: 'immersive-ar',
                     referenceSpaceType: 'unbounded'
@@ -491,53 +551,79 @@
             });
 
             const fm = xrExperience.baseExperience.featuresManager;
+            let imageTracking = null;
 
-            // Enable WebXR Image Tracking Module
-            const imageTracking = fm.enableFeature(
-                BABYLON.WebXRFeatureName.IMAGE_TRACKING,
-                'latest',
-                {
-                    images: [
-                        {
-                            src: 'marker.png',
-                            estimatedRealWorldWidth: 0.2 // 20cm expected marker width
-                        }
-                    ]
-                }
-            );
+            // Enable WebXR Image Tracking Module with graceful fallback for browsers without image tracking support (e.g. Meta Quest)
+            try {
+                imageTracking = fm.enableFeature(
+                    BABYLON.WebXRFeatureName.IMAGE_TRACKING,
+                    'latest',
+                    {
+                        images: [
+                            {
+                                src: 'marker.png',
+                                estimatedRealWorldWidth: 0.2 // 20cm expected marker width
+                            }
+                        ]
+                    }
+                );
+                console.log("WebXR Image Tracking module successfully enabled.");
+            } catch (imageTrackingErr) {
+                console.warn(
+                    "WebXR Image Tracking is not supported on this browser/device (like Meta Quest). " +
+                    "Falling back to basic AR session placement.",
+                    imageTrackingErr
+                );
+            }
 
             // Handle WebXR session state changes
             xrExperience.baseExperience.onStateChangedObservable.add((state) => {
                 if (state === BABYLON.WebXRState.IN_XR) {
-                    markerRoot.setEnabled(false); // Hide 3D scene until camera locates image marker
-                    updateTrackingStatusBadge("Searching for Marker...", "searching");
+                    if (imageTracking) {
+                        markerRoot.setEnabled(false); // Hide 3D scene until camera locates image marker
+                        updateTrackingStatusBadge("Searching for Marker...", "searching");
+                    } else {
+                        // Quest fallback positioning
+                        markerRoot.setEnabled(true);
+                        const cameraPosition = xrExperience.baseExperience.camera.position;
+                        const direction = xrExperience.baseExperience.camera.getForwardRay().direction;
+                        markerRoot.position.copyFrom(cameraPosition).addInPlace(direction.scale(1.2));
+                        markerRoot.rotation.y = Math.atan2(direction.x, direction.z);
+                        updateTrackingStatusBadge("AR Active (No Tracking Marker)", "synced");
+                    }
+                    const startArBtn = document.getElementById('startArBtn');
+                    if (startArBtn) startArBtn.style.display = 'none';
                 } else if (state === BABYLON.WebXRState.NOT_IN_XR) {
                     markerRoot.setEnabled(true); // Re-enable for fallback viewer
                     isTrackingActive = false;
                     updateTrackingStatusBadge("AR Session Ended", "");
+                    const startArBtn = document.getElementById('startArBtn');
+                    if (startArBtn) startArBtn.style.display = 'flex';
                 }
             });
 
-            // Handle Tracked Image Position/Orientation Matrix Updates
-            imageTracking.onTrackedImageUpdatedObservable.add((trackedImage) => {
-                // Decompose transformation matrix to update 3D anchor position and rotation
-                if (trackedImage && trackedImage.transformationMatrix) {
-                    trackedImage.transformationMatrix.decompose(
-                        markerRoot.scaling,
-                        markerRoot.rotationQuaternion || (markerRoot.rotationQuaternion = new BABYLON.Quaternion()),
-                        markerRoot.position
-                    );
-                    
-                    markerRoot.setEnabled(true);
-                    isTrackingActive = true;
-                    updateTrackingStatusBadge("Marker Tracked — Synced AR Active", "synced");
-                }
-            });
+            if (imageTracking) {
+                // Handle Tracked Image Position/Orientation Matrix Updates
+                imageTracking.onTrackedImageUpdatedObservable.add((trackedImage) => {
+                    // Decompose transformation matrix to update 3D anchor position and rotation
+                    if (trackedImage && trackedImage.transformationMatrix) {
+                        trackedImage.transformationMatrix.decompose(
+                            markerRoot.scaling,
+                            markerRoot.rotationQuaternion || (markerRoot.rotationQuaternion = new BABYLON.Quaternion()),
+                            markerRoot.position
+                        );
+                        
+                        markerRoot.setEnabled(true);
+                        isTrackingActive = true;
+                        updateTrackingStatusBadge("Marker Tracked — Synced AR Active", "synced");
+                    }
+                });
+            }
 
             renderMainHUD(true);
 
         } catch (err) {
-            console.warn("Failed to initialize WebXR Image Tracking:", err);
+            console.error("Failed to initialize WebXR Experience:", err);
             renderMainHUD(false);
         }
     }
@@ -564,11 +650,40 @@
             </div>
 
             <div class="hud-footer">
-                <button class="btn-secondary" id="showMarkerBtn">📷 Display / Print AR Marker</button>
+                ${arSupported ? `
+                    <button class="btn-primary" id="startArBtn" style="margin-bottom: 8px;">
+                        <svg style="width: 20px; height: 20px; fill: currentColor; margin-right: 6px;" viewBox="0 0 24 24">
+                            <path d="M21 4.5H3c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2v-11c0-1.1-.9-2-2-2zM7.5 14c-1.38 0-2.5-1.12-2.5-2.5S6.12 9 7.5 9s2.5 1.12 2.5 2.5S8.88 14 7.5 14zm9 0c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                        </svg>
+                        START AR
+                    </button>
+                ` : ''}
+                <div style="display: flex; gap: 8px; width: 100%;">
+                    <button class="btn-secondary" id="showMarkerBtn" style="flex: 1;">📷 Display Marker</button>
+                    <button class="btn-secondary" id="showLogsBtn" style="flex: 1;">📋 System Logs</button>
+                </div>
             </div>
         `;
 
         document.getElementById('showMarkerBtn')?.addEventListener('click', openMarkerModal);
+        document.getElementById('showLogsBtn')?.addEventListener('click', openLogModal);
+        updateLogBadgeUI();
+
+        if (arSupported) {
+            const startArBtn = document.getElementById('startArBtn');
+            startArBtn?.addEventListener('click', async () => {
+                if (xrExperience) {
+                    try {
+                        console.log("Starting WebXR immersive-ar session...");
+                        await xrExperience.baseExperience.enterXRAsync('immersive-ar', 'unbounded');
+                    } catch (err) {
+                        console.error("Failed to enter WebXR Session:", err);
+                    }
+                } else {
+                    console.error("WebXR Experience not initialized yet!");
+                }
+            });
+        }
     }
 
     function updateTimeSyncHUD() {
@@ -609,6 +724,98 @@
         document.getElementById('closeMarkerBtn')?.addEventListener('click', () => {
             modal.remove();
         });
+    }
+
+    // Diagnostic Console Modal Renderers
+    function openLogModal() {
+        const existing = document.getElementById('logModal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.id = 'logModal';
+        modal.style.zIndex = '1000';
+        
+        modal.innerHTML = `
+            <div class="log-modal-card">
+                <button class="modal-close-btn" id="closeLogBtn">&times;</button>
+                <h3 style="margin-bottom: 8px; color: #FFF; display: flex; align-items: center; gap: 8px;">
+                    <span>📋 System Logs & Diagnostics</span>
+                </h3>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px;">
+                    Use these logs to diagnose WebXR, tracking, or connection issues on mobile/Quest.
+                </p>
+                <div class="log-console" id="logConsoleContainer">
+                    ${renderLogLines()}
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 16px;">
+                    <button class="btn-primary" style="padding: 10px 20px; font-size: 0.9rem;" id="copyLogsBtn">
+                        📋 Copy Logs
+                    </button>
+                    <button class="btn-secondary" style="padding: 10px 20px; font-size: 0.9rem; width: auto;" id="clearLogsBtn">
+                        Clear
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        document.getElementById('closeLogBtn')?.addEventListener('click', () => modal.remove());
+        document.getElementById('clearLogsBtn')?.addEventListener('click', () => {
+            logBuffer.length = 0;
+            const container = document.getElementById('logConsoleContainer');
+            if (container) container.innerHTML = renderLogLines();
+            updateLogBadgeUI();
+        });
+        document.getElementById('copyLogsBtn')?.addEventListener('click', () => {
+            const logText = logBuffer.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.message}`).join('\n');
+            navigator.clipboard.writeText(logText);
+            const btn = document.getElementById('copyLogsBtn');
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.textContent = '📋 Copy Logs'; }, 2000);
+        });
+
+        const container = document.getElementById('logConsoleContainer');
+        if (container) container.scrollTop = container.scrollHeight;
+    }
+
+    function renderLogLines() {
+        if (logBuffer.length === 0) {
+            return `<div class="log-line" style="color: var(--text-secondary); font-style: italic;">No logs recorded yet.</div>`;
+        }
+        return logBuffer.map(log => {
+            let color = 'var(--text-primary)';
+            if (log.type === 'error') color = 'var(--accent-magenta)';
+            if (log.type === 'warn') color = 'var(--accent-gold)';
+            if (log.type === 'info') color = 'var(--accent-cyan)';
+            return `<div class="log-line" style="color: ${color};">[${log.timestamp}] [${log.type.toUpperCase()}] ${log.message}</div>`;
+        }).join('');
+    }
+
+    function updateLogConsoleDisplay() {
+        const container = document.getElementById('logConsoleContainer');
+        if (container) {
+            container.innerHTML = renderLogLines();
+            container.scrollTop = container.scrollHeight;
+        }
+    }
+
+    function updateLogBadgeUI() {
+        const logsBtn = document.getElementById('showLogsBtn');
+        if (logsBtn) {
+            const errorCount = logBuffer.filter(l => l.type === 'error').length;
+            const warnCount = logBuffer.filter(l => l.type === 'warn').length;
+            if (errorCount > 0) {
+                logsBtn.innerHTML = `📋 System Logs <span class="badge error-badge">${errorCount}</span>`;
+                logsBtn.classList.add('has-error');
+            } else if (warnCount > 0) {
+                logsBtn.innerHTML = `📋 System Logs <span class="badge warn-badge">${warnCount}</span>`;
+                logsBtn.classList.remove('has-error');
+            } else {
+                logsBtn.innerHTML = `📋 System Logs`;
+                logsBtn.classList.remove('has-error');
+            }
+        }
     }
 
     /**
