@@ -545,7 +545,7 @@
                 disableDefaultUI: true,
                 uiOptions: {
                     sessionMode: 'immersive-ar',
-                    referenceSpaceType: 'unbounded'
+                    referenceSpaceType: 'local-floor'
                 },
                 optionalFeatures: ['image-tracking']
             });
@@ -675,7 +675,7 @@
                 if (xrExperience) {
                     try {
                         console.log("Starting WebXR immersive-ar session...");
-                        await xrExperience.baseExperience.enterXRAsync('immersive-ar', 'unbounded');
+                        await xrExperience.baseExperience.enterXRAsync('immersive-ar', 'local-floor');
                     } catch (err) {
                         console.error("Failed to enter WebXR Session:", err);
                     }
