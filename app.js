@@ -511,6 +511,9 @@
             if (innerRingMat) {
                 innerRingMat.emissiveColor.set(secondaryRgb.r, secondaryRgb.g, secondaryRgb.b);
             }
+
+            // 5. Process optical marker computer vision tracking for WebCam AR Mode (iOS)
+            processOpticalMarkerFrame();
         });
 
         return scene;
@@ -518,11 +521,91 @@
 
     /**
      * ============================================================================
-     * SECTION 5: Dual-Engine AR Setup (WebXR Native + WebCam Fallback)
+     * SECTION 5: Dual-Engine AR Setup (WebXR Native + JSARToolKit5 WebCam AR)
      * ============================================================================
      */
     let isWebcamARActive = false;
     let webcamStream = null;
+    let arController = null;
+    let trackedMarkerId = null;
+    let isMarkerTrackedInWebcam = false;
+
+    function initOpticalMarkerTracking() {
+        if (typeof window.ARCameraParam === 'undefined' || typeof window.ARController === 'undefined') {
+            console.warn("JSARToolKit5 library not found. Running camera view without optical marker tracking.");
+            return;
+        }
+
+        try {
+            console.log("Initializing JSARToolKit5 optical marker tracking engine...");
+            const cameraParam = new window.ARCameraParam();
+            cameraParam.onload = function() {
+                const videoElem = document.getElementById('webcamVideoBg');
+                const w = (videoElem && videoElem.videoWidth) ? videoElem.videoWidth : 640;
+                const h = (videoElem && videoElem.videoHeight) ? videoElem.videoHeight : 480;
+
+                arController = new window.ARController(w, h, cameraParam);
+                arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR);
+
+                arController.loadMarker('marker.patt', function(markerId) {
+                    trackedMarkerId = markerId;
+                    console.log("ARToolKit marker.patt loaded successfully with ID:", markerId);
+                    updateTrackingStatusBadge("Point Camera at Marker...", "searching");
+                });
+            };
+            cameraParam.src = 'camera_para.dat';
+        } catch (e) {
+            console.warn("Failed to initialize ARToolKit optical tracker:", e);
+        }
+    }
+
+    function processOpticalMarkerFrame() {
+        if (!isWebcamARActive || !arController) return;
+
+        const videoElem = document.getElementById('webcamVideoBg');
+        if (!videoElem || videoElem.readyState < 2) return;
+
+        try {
+            arController.process(videoElem);
+            const markerNum = arController.getMarkerNum();
+            let foundMarker = false;
+
+            for (let i = 0; i < markerNum; i++) {
+                const markerInfo = arController.getMarker(i);
+                if (trackedMarkerId !== null && markerInfo.idPatt === trackedMarkerId) {
+                    // Extract 3D transformation matrix for 20cm target marker
+                    const markerMatrix = new Float32Array(12);
+                    arController.getTransMatSquare(i, 0.2, markerMatrix);
+
+                    const glMatrix = new Float32Array(16);
+                    arController.transMatToGLMat(markerMatrix, glMatrix);
+
+                    const bjsMatrix = BABYLON.Matrix.FromArray(glMatrix);
+
+                    bjsMatrix.decompose(
+                        markerRoot.scaling,
+                        markerRoot.rotationQuaternion || (markerRoot.rotationQuaternion = new BABYLON.Quaternion()),
+                        markerRoot.position
+                    );
+
+                    // Adjust Z depth for Babylon camera coordinate space
+                    markerRoot.position.z = Math.abs(markerRoot.position.z);
+
+                    markerRoot.setEnabled(true);
+                    foundMarker = true;
+                    isMarkerTrackedInWebcam = true;
+                    updateTrackingStatusBadge("Marker Tracked — Synced AR Active", "synced");
+                    break;
+                }
+            }
+
+            if (!foundMarker && isMarkerTrackedInWebcam) {
+                updateTrackingStatusBadge("Searching for Optical Marker...", "searching");
+            }
+        } catch (err) {
+            // Ignore frame processing jitter
+        }
+    }
 
     async function setupWebXR() {
         let isSupported = false;
@@ -537,7 +620,7 @@
         }
 
         if (!isSupported) {
-            console.log("Native WebXR immersive-ar is not supported on this browser/device. Ready for Live WebCam AR Mode.");
+            console.log("Native WebXR immersive-ar is not supported on this browser/device. Ready for Optical WebCam AR Mode.");
             renderMainHUD(false, false);
             return;
         }
@@ -671,11 +754,14 @@
             canvas.style.zIndex = '1';
             if (scene) scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
 
-            // Anchor 3D hologram in front of camera
+            // Initial positioning for 3D hologram anchor
             markerRoot.setEnabled(true);
             markerRoot.position.set(0, -0.15, 1.2);
 
-            // Request DeviceOrientation for gyro motion on iOS
+            // Initialize JSARToolKit5 optical marker tracking
+            initOpticalMarkerTracking();
+
+            // Request DeviceOrientation for gyro motion on iOS fallback
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
                     const response = await DeviceOrientationEvent.requestPermission();
@@ -690,7 +776,7 @@
             }
 
             isWebcamARActive = true;
-            updateTrackingStatusBadge("Live WebCam AR Active (Synced)", "synced");
+            updateTrackingStatusBadge("Live WebCam AR Active (Searching Marker)", "searching");
 
             renderMainHUD(false, true);
 
@@ -708,6 +794,13 @@
         }
         const videoElem = document.getElementById('webcamVideoBg');
         if (videoElem) videoElem.remove();
+
+        if (arController) {
+            try { arController.dispose(); } catch (e) {}
+            arController = null;
+        }
+        trackedMarkerId = null;
+        isMarkerTrackedInWebcam = false;
 
         canvas.style.backgroundColor = '';
         if (scene) scene.clearColor = new BABYLON.Color4(0.04, 0.05, 0.08, 1.0);
