@@ -530,32 +530,81 @@
     let trackedMarkerId = null;
     let isMarkerTrackedInWebcam = false;
 
-    function initOpticalMarkerTracking() {
-        if (typeof window.ARCameraParam === 'undefined' || typeof window.ARController === 'undefined') {
-            console.warn("JSARToolKit5 library not found. Running camera view without optical marker tracking.");
+    async function ensureARToolKitReady() {
+        if (window.artoolkit && window.artoolkit.setup && window.ARController) {
+            return true;
+        }
+
+        return new Promise((resolve) => {
+            const onLoaded = () => {
+                window.removeEventListener('artoolkit-loaded', onLoaded);
+                resolve(true);
+            };
+            window.addEventListener('artoolkit-loaded', onLoaded);
+
+            let attempts = 0;
+            const timer = setInterval(() => {
+                attempts++;
+                if (window.artoolkit && window.artoolkit.setup && window.ARController) {
+                    clearInterval(timer);
+                    window.removeEventListener('artoolkit-loaded', onLoaded);
+                    resolve(true);
+                } else if (attempts > 50) {
+                    clearInterval(timer);
+                    window.removeEventListener('artoolkit-loaded', onLoaded);
+                    resolve(false);
+                }
+            }, 100);
+        });
+    }
+
+    async function initOpticalMarkerTracking() {
+        console.log("Waiting for JSARToolKit5 Emscripten engine initialization...");
+        const ready = await ensureARToolKitReady();
+        if (!ready || typeof window.ARCameraParam === 'undefined' || typeof window.ARController === 'undefined') {
+            console.warn("JSARToolKit5 engine failed to initialize. Running camera view without optical marker tracking.");
             return;
         }
 
+        const videoElem = document.getElementById('webcamVideoBg');
+        if (!videoElem) return;
+
+        // Wait for live video element dimensions to be ready
+        let retry = 0;
+        while ((!videoElem.videoWidth || !videoElem.videoHeight) && retry < 60) {
+            await new Promise(r => setTimeout(r, 50));
+            retry++;
+        }
+
         try {
-            console.log("Initializing JSARToolKit5 optical marker tracking engine...");
-            const cameraParam = new window.ARCameraParam();
+            console.log(`Video dimensions ready: ${videoElem.videoWidth}x${videoElem.videoHeight}. Pre-fetching camera parameters...`);
+            
+            // Pre-fetch camera parameter file to Uint8Array to bypass XMLHttpRequest issues
+            const cameraRes = await fetch('camera_para.dat');
+            if (!cameraRes.ok) throw new Error("Failed to fetch camera_para.dat: " + cameraRes.status);
+            const cameraBuf = new Uint8Array(await cameraRes.arrayBuffer());
+
+            const cameraParam = new window.ARCameraParam(cameraBuf);
             cameraParam.onload = function() {
-                const videoElem = document.getElementById('webcamVideoBg');
-                const w = (videoElem && videoElem.videoWidth) ? videoElem.videoWidth : 640;
-                const h = (videoElem && videoElem.videoHeight) ? videoElem.videoHeight : 480;
+                const w = videoElem.videoWidth || 640;
+                const h = videoElem.videoHeight || 480;
 
+                console.log(`Creating ARController with dimensions ${w}x${h}...`);
                 arController = new window.ARController(w, h, cameraParam);
-                arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR);
+                if (window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR !== undefined) {
+                    arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR);
+                }
 
+                console.log("Loading optical marker pattern file (marker.patt)...");
                 arController.loadMarker('marker.patt', function(markerId) {
                     trackedMarkerId = markerId;
-                    console.log("ARToolKit marker.patt loaded successfully with ID:", markerId);
+                    console.log("ARToolKit marker.patt successfully loaded with ID:", markerId);
                     updateTrackingStatusBadge("Point Camera at Marker...", "searching");
                 });
             };
-            cameraParam.src = 'camera_para.dat';
         } catch (e) {
             console.warn("Failed to initialize ARToolKit optical tracker:", e);
+            captureLog('warn', ["ARToolKit init error: " + (e.message || e)]);
         }
     }
 
