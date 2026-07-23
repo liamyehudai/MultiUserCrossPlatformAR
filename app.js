@@ -98,11 +98,13 @@
 
     /**
      * ============================================================================
-     * SECTION 1: Platform Gating & WebXR Capability Detection
+     * SECTION 1: Platform Capability & iOS Support Handling
      * ============================================================================
-     * Apple restricts the standard WebXR Device API on Mobile Safari.
-     * We check for iOS/iPadOS user agents, but auto-detect WebXR-capable browsers
-     * (e.g., Mozilla WebXR Viewer, XR Browser) and provide a manual bypass.
+     * Apple WebKit restricts standard native WebXR API (`immersive-ar`) on Mobile Safari.
+     * To provide full AR functionality on iOS via static GitHub Pages:
+     * 1. On Android / WebXR-capable browsers: Native WebXR Immersive AR + Image Tracking.
+     * 2. On iOS Safari / Non-XR browsers: Live WebCam AR Mode (getUserMedia + Camera Feed + Gyroscope)
+     *    with 100% deterministic time-synchronized 3D holograms.
      */
     function isIOSDevice() {
         const userAgent = window.navigator.userAgent || '';
@@ -112,7 +114,7 @@
     }
 
     function isWebXRSupportedOrBypassed() {
-        // 1. Check for explicit URL query parameter bypass (?xr=1, ?bypass=1, ?bypass_ios=1)
+        // 1. Check for explicit URL query parameter bypass (?xr=1, ?bypass=1)
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.has('xr') || urlParams.has('bypass') || urlParams.has('bypass_ios')) {
             return true;
@@ -123,13 +125,7 @@
             return true;
         }
 
-        // 3. Check for known WebXR browser user-agent identifiers
-        const userAgent = window.navigator.userAgent || '';
-        if (/WebXRViewer|WebXR|XRBrowser|MozillaWebXR/i.test(userAgent)) {
-            return true;
-        }
-
-        // 4. Check for WebXR API availability on window or navigator
+        // 3. Check for WebXR API availability
         if ('xr' in navigator && navigator.xr) {
             return true;
         }
@@ -140,16 +136,16 @@
         return false;
     }
 
-    async function checkShouldShowIOSRestriction() {
+    async function checkShouldShowIOSNotice() {
         if (!isIOSDevice()) {
-            return false; // Non-iOS device, proceed directly
+            return false; // Non-iOS device
         }
 
-        if (isWebXRSupportedOrBypassed()) {
-            return false; // iOS device running a recognized WebXR browser or bypassed
+        if (sessionStorage.getItem('ios_notice_dismissed') === 'true') {
+            return false; // User already acknowledged notice
         }
 
-        // Probing for immersive-ar session support if navigator.xr exists
+        // Probing for native immersive-ar support
         if ('xr' in navigator && navigator.xr && typeof navigator.xr.isSessionSupported === 'function') {
             try {
                 const supported = await navigator.xr.isSessionSupported('immersive-ar');
@@ -159,63 +155,56 @@
             }
         }
 
-        return true; // iOS device running standard Safari without WebXR
+        return true; // iOS Safari device
     }
 
-    function renderIOSRestrictionUI(onBypassCallback) {
-        const currentUrl = window.location.href;
+    function renderIOSNoticeUI(onProceedCallback) {
         uiContainer.innerHTML = `
             <div class="modal-overlay" id="iosModal">
                 <div class="ios-card">
-                    <div class="ios-icon">
+                    <div class="ios-icon" style="background: rgba(0, 240, 255, 0.15); border-color: rgba(0, 240, 255, 0.4); color: var(--accent-cyan);">
                         <svg viewBox="0 0 24 24">
-                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14h2v2h-2v-2zm0-10h2v8h-2V6z"/>
                         </svg>
                     </div>
-                    <h2>iOS WebXR Restriction</h2>
+                    <h2>iOS Shared AR Support</h2>
                     <p>
-                        Apple Mobile Safari restricts the standard WebXR API required for spatial camera image tracking.
+                        Apple Mobile Safari restricts native WebXR APIs, but this application includes a <strong>Live WebCam AR Mode</strong> designed for iOS!
                     </p>
                     <div class="ios-instructions">
-                        <strong>To run Shared AR on iOS:</strong>
-                        <ol>
-                            <li>Download <strong>Mozilla WebXR Viewer</strong> or <strong>XR Browser</strong> from the App Store.</li>
-                            <li>Copy the URL below and paste it into your WebXR browser address bar.</li>
-                        </ol>
-                        <div class="copy-box">
-                            <input type="text" readonly value="${currentUrl}" class="copy-input" id="urlInput">
-                            <button class="btn-secondary" style="width: auto; padding: 6px 14px;" id="copyBtn">Copy Link</button>
-                        </div>
+                        <strong>Features on iOS Safari:</strong>
+                        <ul>
+                            <li>📷 Live rear-camera overlay directly in Safari</li>
+                            <li>⏱️ Sub-frame UTC time-synchronized 3D holograms</li>
+                            <li>🔄 Identical animation phase synced with Android & Quest devices</li>
+                        </ul>
                     </div>
 
-                    <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px;">
-                        <button class="btn-primary" id="bypassIOSBtn">
-                            🚀 I'm using a WebXR Browser — Launch AR
+                    <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 16px;">
+                        <button class="btn-primary" id="startWebcamDirectBtn">
+                            📷 Launch Live WebCam AR Mode
                         </button>
-                        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">
-                            Already in XR Browser or WebXR Viewer? Tap above to launch directly.
-                        </div>
+                        <button class="btn-secondary" id="previewModeBtn">
+                            🌐 Enter 3D Orbit Preview Mode
+                        </button>
                     </div>
                 </div>
             </div>
         `;
 
-        document.getElementById('copyBtn')?.addEventListener('click', () => {
-            const input = document.getElementById('urlInput');
-            if (input) {
-                input.select();
-                navigator.clipboard.writeText(input.value);
-                const btn = document.getElementById('copyBtn');
-                btn.textContent = 'Copied!';
-                setTimeout(() => { btn.textContent = 'Copy Link'; }, 2000);
+        document.getElementById('startWebcamDirectBtn')?.addEventListener('click', () => {
+            sessionStorage.setItem('ios_notice_dismissed', 'true');
+            uiContainer.innerHTML = '';
+            if (typeof onProceedCallback === 'function') {
+                onProceedCallback(true); // Launch WebCam AR
             }
         });
 
-        document.getElementById('bypassIOSBtn')?.addEventListener('click', () => {
-            sessionStorage.setItem('bypass_ios_xr_check', 'true');
+        document.getElementById('previewModeBtn')?.addEventListener('click', () => {
+            sessionStorage.setItem('ios_notice_dismissed', 'true');
             uiContainer.innerHTML = '';
-            if (typeof onBypassCallback === 'function') {
-                onBypassCallback();
+            if (typeof onProceedCallback === 'function') {
+                onProceedCallback(false); // Fallback Preview Mode
             }
         });
     }
@@ -529,14 +518,27 @@
 
     /**
      * ============================================================================
-     * SECTION 5: WebXR Image Tracking Session Initialization
+     * SECTION 5: Dual-Engine AR Setup (WebXR Native + WebCam Fallback)
      * ============================================================================
      */
+    let isWebcamARActive = false;
+    let webcamStream = null;
+
     async function setupWebXR() {
-        const isSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync('immersive-ar');
+        let isSupported = false;
+
+        if ('xr' in navigator && navigator.xr && typeof BABYLON.WebXRSessionManager.IsSessionSupportedAsync === 'function') {
+            try {
+                isSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync('immersive-ar');
+            } catch (err) {
+                console.warn("WebXR session check error:", err);
+                isSupported = false;
+            }
+        }
+
         if (!isSupported) {
-            console.log("WebXR immersive-ar mode is not supported on this device. Running in Desktop Preview mode.");
-            renderMainHUD(false);
+            console.log("Native WebXR immersive-ar is not supported on this browser/device. Ready for Live WebCam AR Mode.");
+            renderMainHUD(false, false);
             return;
         }
 
@@ -553,7 +555,6 @@
             const fm = xrExperience.baseExperience.featuresManager;
             let imageTracking = null;
 
-            // Enable WebXR Image Tracking Module with graceful fallback for browsers without image tracking support (e.g. Meta Quest)
             try {
                 imageTracking = fm.enableFeature(
                     BABYLON.WebXRFeatureName.IMAGE_TRACKING,
@@ -562,43 +563,38 @@
                         images: [
                             {
                                 src: 'marker.png',
-                                // 20cm expected marker width
                                 estimatedRealWorldWidth: 0.2
                             }
                         ]
                     },
-                    false // <--- REQUIRED = FALSE (Marks this feature as optional in the WebXR session request)
+                    false
                 );
                 console.log("WebXR Image Tracking module successfully enabled.");
             } catch (imageTrackingErr) {
                 console.warn(
-                    "WebXR Image Tracking is not supported on this browser/device (like Meta Quest). " +
-                    "Falling back to basic AR session placement.",
+                    "WebXR Image Tracking not supported on this device. Falling back to default WebXR placement.",
                     imageTrackingErr
                 );
             }
 
-            // Handle WebXR session state changes
             xrExperience.baseExperience.onStateChangedObservable.add((state) => {
                 if (state === BABYLON.WebXRState.IN_XR) {
-                    // Check if image tracking feature is actually supported and attached to the session
                     const isImageTrackingAttached = imageTracking && imageTracking.attached;
                     if (isImageTrackingAttached) {
-                        markerRoot.setEnabled(false); // Hide 3D scene until camera locates image marker
+                        markerRoot.setEnabled(false);
                         updateTrackingStatusBadge("Searching for Marker...", "searching");
                     } else {
-                        // Quest fallback positioning
                         markerRoot.setEnabled(true);
                         const cameraPosition = xrExperience.baseExperience.camera.position;
                         const direction = xrExperience.baseExperience.camera.getForwardRay().direction;
                         markerRoot.position.copyFrom(cameraPosition).addInPlace(direction.scale(1.2));
                         markerRoot.rotation.y = Math.atan2(direction.x, direction.z);
-                        updateTrackingStatusBadge("AR Active (No Tracking Marker)", "synced");
+                        updateTrackingStatusBadge("Native WebXR Active", "synced");
                     }
                     const startArBtn = document.getElementById('startArBtn');
                     if (startArBtn) startArBtn.style.display = 'none';
                 } else if (state === BABYLON.WebXRState.NOT_IN_XR) {
-                    markerRoot.setEnabled(true); // Re-enable for fallback viewer
+                    markerRoot.setEnabled(true);
                     isTrackingActive = false;
                     updateTrackingStatusBadge("AR Session Ended", "");
                     const startArBtn = document.getElementById('startArBtn');
@@ -607,12 +603,9 @@
             });
 
             if (imageTracking) {
-                // Handle Tracked Image Position/Orientation Matrix Updates
                 imageTracking.onTrackedImageUpdatedObservable.add((trackedImage) => {
-                    // Only process matrix if image tracking is attached and active
                     if (!imageTracking.attached) return;
 
-                    // Decompose transformation matrix to update 3D anchor position and rotation
                     if (trackedImage && trackedImage.transformationMatrix) {
                         trackedImage.transformationMatrix.decompose(
                             markerRoot.scaling,
@@ -627,11 +620,112 @@
                 });
             }
 
-            renderMainHUD(true);
+            renderMainHUD(true, false);
 
         } catch (err) {
             console.error("Failed to initialize WebXR Experience:", err);
-            renderMainHUD(false);
+            renderMainHUD(false, false);
+        }
+    }
+
+    /**
+     * WebCam AR Mode for iOS Safari & browsers without native WebXR immersive-ar
+     */
+    async function startWebCamAR() {
+        try {
+            console.log("Initializing WebCam AR Mode (iOS & WebAR)...");
+            
+            const constraints = {
+                video: {
+                    facingMode: { ideal: "environment" },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                },
+                audio: false
+            };
+
+            webcamStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+            let videoElem = document.getElementById('webcamVideoBg');
+            if (!videoElem) {
+                videoElem = document.createElement('video');
+                videoElem.id = 'webcamVideoBg';
+                videoElem.setAttribute('autoplay', '');
+                videoElem.setAttribute('muted', '');
+                videoElem.setAttribute('playsinline', '');
+                videoElem.style.position = 'fixed';
+                videoElem.style.top = '0';
+                videoElem.style.left = '0';
+                videoElem.style.width = '100vw';
+                videoElem.style.height = '100vh';
+                videoElem.style.objectFit = 'cover';
+                videoElem.style.zIndex = '0';
+                document.body.insertBefore(videoElem, canvas);
+            }
+            videoElem.srcObject = webcamStream;
+            await videoElem.play();
+
+            // Set canvas transparent over live video
+            canvas.style.backgroundColor = 'transparent';
+            canvas.style.position = 'absolute';
+            canvas.style.zIndex = '1';
+            if (scene) scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+
+            // Anchor 3D hologram in front of camera
+            markerRoot.setEnabled(true);
+            markerRoot.position.set(0, -0.15, 1.2);
+
+            // Request DeviceOrientation for gyro motion on iOS
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const response = await DeviceOrientationEvent.requestPermission();
+                    if (response === 'granted') {
+                        window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+                    }
+                } catch (e) {
+                    console.warn("Device orientation permission denied:", e);
+                }
+            } else if (window.DeviceOrientationEvent) {
+                window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+            }
+
+            isWebcamARActive = true;
+            updateTrackingStatusBadge("Live WebCam AR Active (Synced)", "synced");
+
+            renderMainHUD(false, true);
+
+        } catch (err) {
+            console.error("Failed to launch WebCam AR:", err);
+            captureLog('error', ["WebCam AR Error: " + (err.message || err)]);
+            alert("Unable to access camera. Please ensure camera access is enabled in Safari settings.");
+        }
+    }
+
+    function stopWebCamAR() {
+        if (webcamStream) {
+            webcamStream.getTracks().forEach(track => track.stop());
+            webcamStream = null;
+        }
+        const videoElem = document.getElementById('webcamVideoBg');
+        if (videoElem) videoElem.remove();
+
+        canvas.style.backgroundColor = '';
+        if (scene) scene.clearColor = new BABYLON.Color4(0.04, 0.05, 0.08, 1.0);
+        isWebcamARActive = false;
+
+        window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
+
+        updateTrackingStatusBadge("3D Orbit Preview Mode", "");
+        renderMainHUD(false, false);
+    }
+
+    function handleDeviceOrientation(event) {
+        if (!isWebcamARActive || !scene || !scene.activeCamera) return;
+        if (event.beta !== null && event.gamma !== null) {
+            const pitch = BABYLON.Tools.ToRadians(event.beta - 45);
+            const roll = BABYLON.Tools.ToRadians(event.gamma);
+            scene.activeCamera.alpha = -Math.PI / 2 + roll * 0.4;
+            scene.activeCamera.beta = Math.PI / 3 + pitch * 0.3;
         }
     }
 
@@ -640,18 +734,32 @@
      * SECTION 6: UI Rendering & User Interaction Handlers
      * ============================================================================
      */
-    function renderMainHUD(arSupported) {
+    function renderMainHUD(arSupported, webcamActive = isWebcamARActive) {
+        const isIOS = isIOSDevice();
+        let badgeText = '3D Preview Mode';
+        let badgeClass = 'synced';
+        if (arSupported) {
+            badgeText = 'Native WebXR Ready';
+            badgeClass = 'searching';
+        } else if (webcamActive) {
+            badgeText = 'Live WebCam AR Active';
+            badgeClass = 'synced';
+        } else if (isIOS) {
+            badgeText = 'iOS WebCam AR Ready';
+            badgeClass = 'searching';
+        }
+
         uiContainer.innerHTML = `
             <div class="hud-header">
                 <div class="hud-badge-row">
                     <div class="status-badge" id="trackingStatus">
-                        <span class="status-dot ${arSupported ? 'searching' : 'synced'}" id="statusDot"></span>
-                        <span id="statusText">${arSupported ? 'AR Ready' : '3D Preview Mode'}</span>
+                        <span class="status-dot ${badgeClass}" id="statusDot"></span>
+                        <span id="statusText">${badgeText}</span>
                     </div>
                 </div>
 
                 <div class="time-sync-card">
-                    <div>Clock Sync Offset: <span class="val" id="offsetVal">${timeOffset} ms</span></div>
+                    <div>Clock Sync Offset: <span class="val" id="offsetVal">${timeOffset > 0 ? '+' : ''}${timeOffset} ms</span></div>
                     <div>Network RTT: <span class="val" id="rttVal">${timeSyncLatency} ms</span></div>
                 </div>
             </div>
@@ -662,9 +770,13 @@
                         <svg style="width: 20px; height: 20px; fill: currentColor; margin-right: 6px;" viewBox="0 0 24 24">
                             <path d="M21 4.5H3c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2v-11c0-1.1-.9-2-2-2zM7.5 14c-1.38 0-2.5-1.12-2.5-2.5S6.12 9 7.5 9s2.5 1.12 2.5 2.5S8.88 14 7.5 14zm9 0c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
                         </svg>
-                        START AR
+                        START WEBXR AR
                     </button>
-                ` : ''}
+                ` : `
+                    <button class="btn-primary" id="startArBtn" style="margin-bottom: 8px; ${webcamActive ? 'background: linear-gradient(135deg, #FF0055 0%, #FF5500 100%);' : ''}">
+                        ${webcamActive ? '🛑 STOP WEBCAM AR' : (isIOS ? '📷 START WEBCAM AR (iOS)' : '📷 START WEBCAM AR')}
+                    </button>
+                `}
                 <div style="display: flex; gap: 8px; width: 100%;">
                     <button class="btn-secondary" id="showMarkerBtn" style="flex: 1;">📷 Display Marker</button>
                     <button class="btn-secondary" id="showLogsBtn" style="flex: 1;">📋 System Logs</button>
@@ -676,18 +788,22 @@
         document.getElementById('showLogsBtn')?.addEventListener('click', openLogModal);
         updateLogBadgeUI();
 
-        if (arSupported) {
-            const startArBtn = document.getElementById('startArBtn');
-            startArBtn?.addEventListener('click', async () => {
-                if (xrExperience) {
+        const startArBtn = document.getElementById('startArBtn');
+        if (startArBtn) {
+            startArBtn.addEventListener('click', async () => {
+                if (arSupported && xrExperience) {
                     try {
-                        console.log("Starting WebXR immersive-ar session...");
+                        console.log("Starting native WebXR immersive-ar session...");
                         await xrExperience.baseExperience.enterXRAsync('immersive-ar', 'local-floor');
                     } catch (err) {
                         console.error("Failed to enter WebXR Session:", err);
                     }
                 } else {
-                    console.error("WebXR Experience not initialized yet!");
+                    if (webcamActive) {
+                        stopWebCamAR();
+                    } else {
+                        await startWebCamAR();
+                    }
                 }
             });
         }
@@ -831,11 +947,14 @@
      * ============================================================================
      */
     async function initApp() {
-        // 1. Check iOS Platform Restriction vs WebXR capabilities / bypass
-        const showRestriction = await checkShouldShowIOSRestriction();
-        if (showRestriction) {
-            renderIOSRestrictionUI(() => {
-                startMainApp();
+        // 1. Check iOS Platform notice
+        const showNotice = await checkShouldShowIOSNotice();
+        if (showNotice) {
+            renderIOSNoticeUI(async (launchWebcamDirectly) => {
+                await startMainApp();
+                if (launchWebcamDirectly) {
+                    await startWebCamAR();
+                }
             });
             return;
         }
@@ -861,7 +980,7 @@
             engine.resize();
         });
 
-        // 4. Setup WebXR Experience & Image Tracking
+        // 4. Setup WebXR Experience & Dual Engine Fallback
         await setupWebXR();
     }
 

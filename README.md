@@ -87,13 +87,12 @@ MultiUserCrossPlatformAR/
 
 | Platform / Device | Browser | WebXR AR Mode | Fallback / Behavior |
 | :--- | :--- | :---: | :--- |
-| **Android** | Google Chrome | ✅ Supported | Native Immersive AR Session |
+| **Android** | Google Chrome | ✅ Supported | Native Immersive WebXR AR + Image Tracking |
 | **Meta Quest 2/3/Pro** | Meta Quest Browser | ✅ Supported | Native Pass-through WebXR AR |
-| **iOS / iPadOS** | Safari (Default) | ❌ Gated | Renders modal with WebXR browser setup steps & bypass button |
-| **iOS / iPadOS** | WebXR Viewer / XR Browser | ✅ Supported | Auto-detected OR bypass via **"🚀 Launch AR"** button |
+| **iOS / iPadOS** | Mobile Safari | 📷 WebCam AR Mode | Live Rear-Camera Feed + Time-Synced Hologram |
 | **Desktop PC / Mac** | Chrome / Firefox / Edge | ℹ️ Preview | Interactive 3D Orbit Camera Mode |
 
-> 💡 **iOS Note**: On iOS WebXR browsers (such as WebXR Viewer or XR Browser), the app auto-detects `navigator.xr` capabilities. If the modal still appears, tap **"🚀 I'm using a WebXR Browser — Launch AR"** or add `?xr=1` to the URL.
+> 💡 **iOS & GitHub Pages Support**: Standard iOS Mobile Safari restricts native WebXR (`navigator.xr`). This application automatically detects iOS and activates **Live WebCam AR Mode** directly in Safari, using the rear camera stream and device orientation while maintaining 100% synchronized clock and animation phase across all devices!
 
 ---
 
