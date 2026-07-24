@@ -70,9 +70,11 @@
 
     // Catch unhandled exceptions and promise rejections
     window.addEventListener('error', (event) => {
+        if (event.message && String(event.message).includes('__gCrWeb')) return;
         captureLog('error', [event.error || event.message]);
     });
     window.addEventListener('unhandledrejection', (event) => {
+        if (event.reason && String(event.reason).includes('__gCrWeb')) return;
         captureLog('error', [`Unhandled Promise Rejection: ${event.reason}`]);
     });
 
@@ -593,24 +595,31 @@
             if (!cameraRes.ok) throw new Error("Failed to fetch camera_para.dat: " + cameraRes.status);
             const cameraBuf = new Uint8Array(await cameraRes.arrayBuffer());
 
-            const cameraParam = new window.ARCameraParam(cameraBuf);
-            cameraParam.onload = function() {
-                const w = videoElem.videoWidth || 640;
-                const h = videoElem.videoHeight || 480;
+            const cameraParam = new window.ARCameraParam(
+                cameraBuf,
+                function() {
+                    const w = videoElem.videoWidth || 640;
+                    const h = videoElem.videoHeight || 480;
 
-                console.log(`Creating ARController with dimensions ${w}x${h}...`);
-                arController = new window.ARController(w, h, cameraParam);
-                if (window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR !== undefined) {
-                    arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR);
+                    console.log(`Creating ARController with dimensions ${w}x${h}...`);
+                    arController = new window.ARController(w, h, cameraParam);
+                    if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR !== undefined) {
+                        arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR);
+                    } else if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_COLOR !== undefined) {
+                        arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR);
+                    }
+
+                    console.log("Loading optical marker pattern file (marker.patt)...");
+                    arController.loadMarker('marker.patt', function(markerId) {
+                        trackedMarkerId = markerId;
+                        console.log("ARToolKit marker.patt successfully loaded with ID:", markerId);
+                        updateTrackingStatusBadge("Point Camera at Marker...", "searching");
+                    });
+                },
+                function(err) {
+                    console.error("Error loading ARCameraParam:", err);
                 }
-
-                console.log("Loading optical marker pattern file (marker.patt)...");
-                arController.loadMarker('marker.patt', function(markerId) {
-                    trackedMarkerId = markerId;
-                    console.log("ARToolKit marker.patt successfully loaded with ID:", markerId);
-                    updateTrackingStatusBadge("Point Camera at Marker...", "searching");
-                });
-            };
+            );
         } catch (e) {
             console.warn("Failed to initialize ARToolKit optical tracker:", e);
             captureLog('warn', ["ARToolKit init error: " + (e.message || e)]);
@@ -630,7 +639,7 @@
 
             for (let i = 0; i < markerNum; i++) {
                 const markerInfo = arController.getMarker(i);
-                if (trackedMarkerId !== null && markerInfo.idPatt === trackedMarkerId) {
+                if (trackedMarkerId !== null && (markerInfo.idPatt === trackedMarkerId || markerInfo.id === trackedMarkerId || (markerInfo.idPatt !== undefined && markerInfo.idPatt >= 0))) {
                     // Extract 3D transformation matrix for 20cm target marker
                     const markerMatrix = new Float32Array(12);
                     arController.getTransMatSquare(i, 0.2, markerMatrix);
@@ -775,6 +784,20 @@
      * WebCam AR Mode for iOS Safari & browsers without native WebXR immersive-ar
      */
     async function startWebCamAR() {
+        // Request DeviceOrientation for gyro motion on iOS fallback within user gesture turn
+        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+            try {
+                const response = await DeviceOrientationEvent.requestPermission();
+                if (response === 'granted') {
+                    window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+                }
+            } catch (e) {
+                console.warn("Device orientation permission request bypassed:", e);
+            }
+        } else if (window.DeviceOrientationEvent) {
+            window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+        }
+
         try {
             console.log("Initializing WebCam AR Mode (iOS & WebAR)...");
             
@@ -820,20 +843,6 @@
 
             // Initialize JSARToolKit5 optical marker tracking
             initOpticalMarkerTracking();
-
-            // Request DeviceOrientation for gyro motion on iOS fallback
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                try {
-                    const response = await DeviceOrientationEvent.requestPermission();
-                    if (response === 'granted') {
-                        window.addEventListener('deviceorientation', handleDeviceOrientation, true);
-                    }
-                } catch (e) {
-                    console.warn("Device orientation permission denied:", e);
-                }
-            } else if (window.DeviceOrientationEvent) {
-                window.addEventListener('deviceorientation', handleDeviceOrientation, true);
-            }
 
             isWebcamARActive = true;
             updateTrackingStatusBadge("Live WebCam AR Active (Searching Marker)", "searching");
