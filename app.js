@@ -195,6 +195,7 @@
         `;
 
         document.getElementById('startWebcamDirectBtn')?.addEventListener('click', () => {
+            requestDeviceOrientationPermission();
             sessionStorage.setItem('ios_notice_dismissed', 'true');
             uiContainer.innerHTML = '';
             if (typeof onProceedCallback === 'function') {
@@ -203,12 +204,27 @@
         });
 
         document.getElementById('previewModeBtn')?.addEventListener('click', () => {
+            requestDeviceOrientationPermission();
             sessionStorage.setItem('ios_notice_dismissed', 'true');
             uiContainer.innerHTML = '';
             if (typeof onProceedCallback === 'function') {
                 onProceedCallback(false); // Fallback Preview Mode
             }
         });
+    }
+
+    function requestDeviceOrientationPermission() {
+        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+            DeviceOrientationEvent.requestPermission().then(response => {
+                if (response === 'granted') {
+                    window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+                }
+            }).catch(e => {
+                // Ignore if user dismisses prompt
+            });
+        } else if (window.DeviceOrientationEvent) {
+            window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+        }
     }
 
     /**
@@ -595,27 +611,31 @@
             if (!cameraRes.ok) throw new Error("Failed to fetch camera_para.dat: " + cameraRes.status);
             const cameraBuf = new Uint8Array(await cameraRes.arrayBuffer());
 
-            const cameraParam = new window.ARCameraParam(
+            let cameraParam = null;
+            const onLoadCallback = function() {
+                const paramInstance = this || cameraParam;
+                const w = videoElem.videoWidth || 640;
+                const h = videoElem.videoHeight || 480;
+
+                console.log(`Creating ARController with dimensions ${w}x${h}...`);
+                arController = new window.ARController(w, h, paramInstance);
+                if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR !== undefined) {
+                    arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR);
+                } else if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_COLOR !== undefined) {
+                    arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR);
+                }
+
+                console.log("Loading optical marker pattern file (marker.patt)...");
+                arController.loadMarker('marker.patt', function(markerId) {
+                    trackedMarkerId = markerId;
+                    console.log("ARToolKit marker.patt successfully loaded with ID:", markerId);
+                    updateTrackingStatusBadge("Point Camera at Marker...", "searching");
+                });
+            };
+
+            cameraParam = new window.ARCameraParam(
                 cameraBuf,
-                function() {
-                    const w = videoElem.videoWidth || 640;
-                    const h = videoElem.videoHeight || 480;
-
-                    console.log(`Creating ARController with dimensions ${w}x${h}...`);
-                    arController = new window.ARController(w, h, cameraParam);
-                    if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR !== undefined) {
-                        arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR);
-                    } else if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_COLOR !== undefined) {
-                        arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR);
-                    }
-
-                    console.log("Loading optical marker pattern file (marker.patt)...");
-                    arController.loadMarker('marker.patt', function(markerId) {
-                        trackedMarkerId = markerId;
-                        console.log("ARToolKit marker.patt successfully loaded with ID:", markerId);
-                        updateTrackingStatusBadge("Point Camera at Marker...", "searching");
-                    });
-                },
+                onLoadCallback,
                 function(err) {
                     console.error("Error loading ARCameraParam:", err);
                 }
@@ -785,18 +805,7 @@
      */
     async function startWebCamAR() {
         // Request DeviceOrientation for gyro motion on iOS fallback within user gesture turn
-        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-            try {
-                const response = await DeviceOrientationEvent.requestPermission();
-                if (response === 'granted') {
-                    window.addEventListener('deviceorientation', handleDeviceOrientation, true);
-                }
-            } catch (e) {
-                console.warn("Device orientation permission request bypassed:", e);
-            }
-        } else if (window.DeviceOrientationEvent) {
-            window.addEventListener('deviceorientation', handleDeviceOrientation, true);
-        }
+        requestDeviceOrientationPermission();
 
         try {
             console.log("Initializing WebCam AR Mode (iOS & WebAR)...");
@@ -953,6 +962,7 @@
         const startArBtn = document.getElementById('startArBtn');
         if (startArBtn) {
             startArBtn.addEventListener('click', async () => {
+                requestDeviceOrientationPermission();
                 if (arSupported && xrExperience) {
                     try {
                         console.log("Starting native WebXR immersive-ar session...");
