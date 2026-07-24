@@ -653,6 +653,15 @@
         }
     }
 
+    // Temporal Pose Smoothing & Orientation Alignment State
+    let markerHoldCounter = 0;
+    const MAX_HOLD_FRAMES = 15;
+    const POSE_SMOOTH_FACTOR = 0.25;
+    const rawTargetPos = new BABYLON.Vector3();
+    const rawTargetRot = new BABYLON.Quaternion();
+    const rawTargetScale = new BABYLON.Vector3();
+    const alignX90 = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.X, Math.PI / 2);
+
     function processOpticalMarkerFrame() {
         if (!isWebcamARActive || !arController) return;
 
@@ -662,7 +671,7 @@
         try {
             arController.process(videoElem);
             const markerNum = arController.getMarkerNum();
-            let foundMarker = false;
+            let detectedInThisFrame = false;
 
             for (let i = 0; i < markerNum; i++) {
                 const markerInfo = arController.getMarker(i);
@@ -680,24 +689,46 @@
 
                     const bjsMatrix = BABYLON.Matrix.FromArray(glMatrix);
 
-                    bjsMatrix.decompose(
-                        markerRoot.scaling,
-                        markerRoot.rotationQuaternion || (markerRoot.rotationQuaternion = new BABYLON.Quaternion()),
-                        markerRoot.position
-                    );
+                    bjsMatrix.decompose(rawTargetScale, rawTargetRot, rawTargetPos);
 
                     // Adjust Z depth for Babylon camera coordinate space
-                    markerRoot.position.z = Math.abs(markerRoot.position.z);
+                    rawTargetPos.z = Math.abs(rawTargetPos.z);
 
-                    markerRoot.setEnabled(true);
-                    foundMarker = true;
-                    isMarkerTrackedInWebcam = true;
-                    updateTrackingStatusBadge("Marker Tracked — Synced AR Active", "synced");
+                    // Align 3D hologram flat on desk horizontal plane (90deg X rotation offset)
+                    rawTargetRot.multiplyInPlace(alignX90);
+
+                    detectedInThisFrame = true;
+                    markerHoldCounter = MAX_HOLD_FRAMES;
                     break;
                 }
             }
 
-            if (!foundMarker && isMarkerTrackedInWebcam) {
+            if (detectedInThisFrame || markerHoldCounter > 0) {
+                if (!detectedInThisFrame) {
+                    markerHoldCounter--; // Hold pose during brief frame drops
+                }
+
+                if (!markerRoot.rotationQuaternion) {
+                    markerRoot.rotationQuaternion = rawTargetRot.clone();
+                }
+
+                // Apply Exponential Moving Average (EMA) Pose Smoothing
+                markerRoot.position = BABYLON.Vector3.Lerp(markerRoot.position, rawTargetPos, POSE_SMOOTH_FACTOR);
+                markerRoot.rotationQuaternion = BABYLON.Quaternion.Slerp(markerRoot.rotationQuaternion, rawTargetRot, POSE_SMOOTH_FACTOR);
+
+                markerRoot.setEnabled(true);
+                isMarkerTrackedInWebcam = true;
+
+                // Live Pose Diagnostic Readings
+                const euler = markerRoot.rotationQuaternion.toEulerAngles();
+                const posX = markerRoot.position.x.toFixed(2);
+                const posY = markerRoot.position.y.toFixed(2);
+                const posZ = markerRoot.position.z.toFixed(2);
+                const pitchDeg = Math.round(BABYLON.Tools.ToDegrees(euler.x));
+                const yawDeg = Math.round(BABYLON.Tools.ToDegrees(euler.y));
+
+                updateTrackingStatusBadge(`Synced AR [P:${posX},${posY},${posZ}m | Rot:${pitchDeg}°/${yawDeg}°]`, "synced");
+            } else if (isMarkerTrackedInWebcam) {
                 updateTrackingStatusBadge("Searching for Optical Marker...", "searching");
             }
         } catch (err) {
