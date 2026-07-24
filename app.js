@@ -614,11 +614,19 @@
             let cameraParam = null;
             const onLoadCallback = function() {
                 const paramInstance = this || cameraParam;
-                const w = videoElem.videoWidth || 640;
-                const h = videoElem.videoHeight || 480;
+                const vW = videoElem.videoWidth || 640;
+                const vH = videoElem.videoHeight || 480;
 
-                console.log(`Creating ARController with dimensions ${w}x${h}...`);
-                arController = new window.ARController(w, h, paramInstance);
+                // JSARToolKit camera_para.dat is calibrated for landscape aspect ratio (640x480).
+                // On portrait mobile streams (e.g. 720x1280), passing portrait dimensions distorts
+                // focal length scaling non-uniformly (2.37x distortion), inflating Z depth calculation.
+                // Always use landscape-oriented dimensions (max x min) for ARController camera parameters:
+                const isPortrait = vW < vH;
+                const arW = isPortrait ? Math.max(vW, vH) : vW;
+                const arH = isPortrait ? Math.min(vW, vH) : vH;
+
+                console.log(`Creating ARController with uniform camera dimensions ${arW}x${arH} (Portrait stream: ${isPortrait})...`);
+                arController = new window.ARController(arW, arH, paramInstance);
                 if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_COLOR_AND_MATRIX !== undefined) {
                     arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR_AND_MATRIX);
                 } else if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR !== undefined) {
