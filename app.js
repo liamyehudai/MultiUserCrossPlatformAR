@@ -714,9 +714,9 @@
                 const isMatrixMatch = (markerInfo.idMatrix !== undefined && markerInfo.idMatrix >= 0);
 
                 if (isTemplateMatch || isMatrixMatch) {
-                    // Extract 3D transformation matrix for 20cm target marker
+                    // Extract 3D transformation matrix for 15cm target marker (standard printout size)
                     const markerMatrix = new Float32Array(12);
-                    arController.getTransMatSquare(i, 0.2, markerMatrix);
+                    arController.getTransMatSquare(i, 0.15, markerMatrix);
 
                     const glMatrix = new Float32Array(16);
                     arController.transMatToGLMat(markerMatrix, glMatrix);
@@ -727,6 +727,18 @@
 
                     // Adjust Z depth for Babylon camera coordinate space
                     rawTargetPos.z = Math.abs(rawTargetPos.z);
+
+                    // If mobile camera stream is in portrait orientation (videoWidth < videoHeight),
+                    // rotate optical coordinate axes by 90 degrees to align with screen space.
+                    if (videoElem.videoWidth < videoElem.videoHeight) {
+                        const origX = rawTargetPos.x;
+                        const origY = rawTargetPos.y;
+                        rawTargetPos.x = -origY;
+                        rawTargetPos.y = origX;
+
+                        const alignPortraitZ = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Z, -Math.PI / 2);
+                        rawTargetRot.multiplyInPlace(alignPortraitZ);
+                    }
 
                     // Align 3D hologram flat on desk horizontal plane (90deg X rotation offset)
                     rawTargetRot.multiplyInPlace(alignX90);
