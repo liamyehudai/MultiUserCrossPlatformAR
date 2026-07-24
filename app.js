@@ -1207,16 +1207,20 @@
                     <span>📋 System Telemetry & Diagnostic Logs</span>
                 </h3>
                 <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px;">
-                    Copy full telemetry and system logs to share camera, tracking, and render state for debugging.
+                    Copy telemetry report or tap "Select All" to manual copy logs for debugging.
                 </p>
                 <div class="log-console" id="logConsoleContainer">
                     ${renderLogLines()}
                 </div>
-                <div style="display: flex; gap: 10px; margin-top: 16px;">
-                    <button class="btn-primary" style="padding: 10px 20px; font-size: 0.9rem;" id="copyLogsBtn">
-                        📋 Copy Telemetry & Logs
+                <textarea id="telemetryExportBox" style="display: none; width: 100%; height: 180px; margin-top: 10px; background: #0c0f1d; color: var(--accent-cyan); font-family: var(--font-mono); font-size: 0.75rem; padding: 10px; border: 1px solid var(--card-border); border-radius: 8px; resize: vertical;" readonly></textarea>
+                <div style="display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap;">
+                    <button class="btn-primary" style="padding: 10px 16px; font-size: 0.85rem; flex: 1;" id="copyLogsBtn">
+                        📋 Copy Telemetry
                     </button>
-                    <button class="btn-secondary" style="padding: 10px 20px; font-size: 0.9rem; width: auto;" id="clearLogsBtn">
+                    <button class="btn-secondary" style="padding: 10px 16px; font-size: 0.85rem; width: auto;" id="showTextareaBtn">
+                        📄 View Raw Text
+                    </button>
+                    <button class="btn-secondary" style="padding: 10px 16px; font-size: 0.85rem; width: auto;" id="clearLogsBtn">
                         Clear
                     </button>
                 </div>
@@ -1224,29 +1228,89 @@
         `;
         document.body.appendChild(modal);
 
+        const copyBtn = document.getElementById('copyLogsBtn');
+        const showTextBtn = document.getElementById('showTextareaBtn');
+        const textExportBox = document.getElementById('telemetryExportBox');
+
         document.getElementById('closeLogBtn')?.addEventListener('click', () => modal.remove());
+        
         document.getElementById('clearLogsBtn')?.addEventListener('click', () => {
             logBuffer.length = 0;
             const container = document.getElementById('logConsoleContainer');
             if (container) container.innerHTML = renderLogLines();
+            if (textExportBox) textExportBox.value = '';
             updateLogBadgeUI();
         });
-        document.getElementById('copyLogsBtn')?.addEventListener('click', async () => {
+
+        showTextBtn?.addEventListener('click', () => {
+            if (!textExportBox) return;
             const fullReport = getDiagnosticTelemetryReport();
-            try {
-                await navigator.clipboard.writeText(fullReport);
-            } catch (e) {
-                const textArea = document.createElement('textarea');
-                textArea.value = fullReport;
-                document.body.appendChild(textArea);
-                textArea.select();
-                document.execCommand('copy');
-                textArea.remove();
+            textExportBox.value = fullReport;
+            if (textExportBox.style.display === 'none') {
+                textExportBox.style.display = 'block';
+                textExportBox.select();
+                textExportBox.setSelectionRange(0, 999999);
+                showTextBtn.textContent = 'Hide Text';
+            } else {
+                textExportBox.style.display = 'none';
+                showTextBtn.textContent = '📄 View Raw Text';
             }
-            const btn = document.getElementById('copyLogsBtn');
-            btn.textContent = 'Copied!';
-            setTimeout(() => { btn.textContent = '📋 Copy Telemetry & Logs'; }, 2000);
         });
+
+        copyBtn?.addEventListener('click', () => {
+            const fullReport = getDiagnosticTelemetryReport();
+            
+            // Also populate text box in case user wants to manually select
+            if (textExportBox) textExportBox.value = fullReport;
+
+            const notifyCopied = () => {
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => { copyBtn.textContent = '📋 Copy Telemetry'; }, 2000);
+            };
+
+            // Modern navigator.clipboard API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(fullReport).then(() => {
+                    notifyCopied();
+                }).catch(() => {
+                    executeFallbackCopy(fullReport, notifyCopied);
+                });
+            } else {
+                executeFallbackCopy(fullReport, notifyCopied);
+            }
+        });
+
+        function executeFallbackCopy(text, onSuccess) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.top = '0';
+            textArea.style.left = '0';
+            textArea.style.width = '2em';
+            textArea.style.height = '2em';
+            textArea.style.padding = '0';
+            textArea.style.border = 'none';
+            textArea.style.outline = 'none';
+            textArea.style.boxShadow = 'none';
+            textArea.style.background = 'transparent';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            textArea.setSelectionRange(0, 999999);
+
+            try {
+                const successful = document.execCommand('copy');
+                if (successful && onSuccess) onSuccess();
+            } catch (err) {
+                console.warn("Fallback copy failed on iOS:", err);
+                if (textExportBox) {
+                    textExportBox.style.display = 'block';
+                    textExportBox.select();
+                    textExportBox.setSelectionRange(0, 999999);
+                }
+            }
+            document.body.removeChild(textArea);
+        }
 
         const container = document.getElementById('logConsoleContainer');
         if (container) container.scrollTop = container.scrollHeight;
