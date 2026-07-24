@@ -93,6 +93,7 @@
     let satellites = [];
     let xrExperience = null;
     let isTrackingActive = false;
+    let selectedMarkerSizeMeters = 0.20; // Default 20cm target printout size
 
     // DOM Element References
     const canvas = document.getElementById('renderCanvas');
@@ -722,9 +723,9 @@
                 const isMatrixMatch = (markerInfo.idMatrix !== undefined && markerInfo.idMatrix >= 0);
 
                 if (isTemplateMatch || isMatrixMatch) {
-                    // Extract 3D transformation matrix for 15cm target marker (standard printout size)
+                    // Extract 3D transformation matrix (in normalized marker width units)
                     const markerMatrix = new Float32Array(12);
-                    arController.getTransMatSquare(i, 0.15, markerMatrix);
+                    arController.getTransMatSquare(i, 1.0, markerMatrix);
 
                     const glMatrix = new Float32Array(16);
                     arController.transMatToGLMat(markerMatrix, glMatrix);
@@ -732,6 +733,9 @@
                     const bjsMatrix = BABYLON.Matrix.FromArray(glMatrix);
 
                     bjsMatrix.decompose(rawTargetScale, rawTargetRot, rawTargetPos);
+
+                    // Convert marker-width units to real-world meters using user-selected marker printout size
+                    rawTargetPos.scaleInPlace(selectedMarkerSizeMeters);
 
                     // Adjust Z depth for Babylon camera coordinate space
                     rawTargetPos.z = Math.abs(rawTargetPos.z);
@@ -1046,6 +1050,14 @@
             </div>
 
             <div class="hud-footer">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 0.8rem; background: var(--card-bg); padding: 8px 12px; border-radius: 12px; backdrop-filter: var(--glass-blur); border: 1px solid var(--card-border);">
+                    <span style="color: var(--text-secondary); font-size: 0.75rem;">Printout Marker Size:</span>
+                    <div style="display: flex; gap: 6px;">
+                        <button class="size-preset-btn" data-size="0.10" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 6px; border: 1px solid var(--card-border); background: ${selectedMarkerSizeMeters === 0.10 ? 'var(--accent-cyan)' : 'rgba(255,255,255,0.08)'}; color: ${selectedMarkerSizeMeters === 0.10 ? '#000' : '#FFF'}; font-weight: 700; cursor: pointer;">10cm</button>
+                        <button class="size-preset-btn" data-size="0.15" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 6px; border: 1px solid var(--card-border); background: ${selectedMarkerSizeMeters === 0.15 ? 'var(--accent-cyan)' : 'rgba(255,255,255,0.08)'}; color: ${selectedMarkerSizeMeters === 0.15 ? '#000' : '#FFF'}; font-weight: 700; cursor: pointer;">15cm</button>
+                        <button class="size-preset-btn" data-size="0.20" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 6px; border: 1px solid var(--card-border); background: ${selectedMarkerSizeMeters === 0.20 ? 'var(--accent-cyan)' : 'rgba(255,255,255,0.08)'}; color: ${selectedMarkerSizeMeters === 0.20 ? '#000' : '#FFF'}; font-weight: 700; cursor: pointer;">20cm</button>
+                    </div>
+                </div>
                 ${arSupported ? `
                     <button class="btn-primary" id="startArBtn" style="margin-bottom: 8px;">
                         <svg style="width: 20px; height: 20px; fill: currentColor; margin-right: 6px;" viewBox="0 0 24 24">
@@ -1064,6 +1076,16 @@
                 </div>
             </div>
         `;
+
+        document.querySelectorAll('.size-preset-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const sz = parseFloat(e.currentTarget.getAttribute('data-size'));
+                if (sz) {
+                    selectedMarkerSizeMeters = sz;
+                    renderMainHUD(arSupported, webcamActive);
+                }
+            });
+        });
 
         document.getElementById('showMarkerBtn')?.addEventListener('click', openMarkerModal);
         document.getElementById('showLogsBtn')?.addEventListener('click', openLogModal);
@@ -1179,6 +1201,7 @@
             `Screen Viewport: ${screenW}x${screenH} (DPR: ${window.devicePixelRatio}) | Aspect: ${screenAspect}`,
             `Camera Stream: ${videoInfo}`,
             `Tracking Mode: ${trackingState}`,
+            `Target Marker Scale: ${(selectedMarkerSizeMeters * 100).toFixed(0)}cm (${selectedMarkerSizeMeters}m)`,
             `Active Camera Node: ${camName}`,
             `Marker Pose Position: ${markerPosStr}`,
             `Marker Pose Rotation: ${markerRotStr}`,
