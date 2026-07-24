@@ -223,20 +223,45 @@
      * Synchronized Epoch Seconds (t) = (Date.now() + timeOffset) / 1000.0
      */
     async function synchronizeClock() {
-        const endpoints = [
-            'https://worldtimeapi.org/api/timezone/Etc/UTC',
-            'https://timeapi.io/api/v1/time/current/zone?timeZone=UTC'
-        ];
-
         let minRTT = Infinity;
         let selectedOffset = 0;
+        let syncMethod = '';
 
-        // Perform 3 iterations to select the sample with minimum network jitter
-        for (let attempt = 0; attempt < 3; attempt++) {
+        // 1. Primary: Same-Origin HTTP Date Header (Fastest & 100% reliable without CORS issues)
+        try {
+            for (let attempt = 0; attempt < 3; attempt++) {
+                const tStart = Date.now();
+                const response = await fetch(window.location.href, { method: 'HEAD', cache: 'no-store' });
+                const tEnd = Date.now();
+                const serverDateStr = response.headers.get('date');
+
+                if (serverDateStr) {
+                    const rtt = tEnd - tStart;
+                    const serverTimeMs = new Date(serverDateStr).getTime() + (rtt / 2.0);
+                    const offset = serverTimeMs - tEnd;
+
+                    if (rtt < minRTT) {
+                        minRTT = rtt;
+                        selectedOffset = offset;
+                        syncMethod = 'HTTP Date Header';
+                    }
+                }
+            }
+        } catch (sameOriginErr) {
+            // Same-origin fetch might fail on file:// protocol
+        }
+
+        // 2. Secondary Fallback: Third-party World Time APIs (silently try if same-origin is unavailable)
+        if (minRTT === Infinity) {
+            const endpoints = [
+                'https://worldtimeapi.org/api/timezone/Etc/UTC',
+                'https://timeapi.io/api/v1/time/current/zone?timeZone=UTC'
+            ];
+
             for (const url of endpoints) {
                 try {
                     const tStart = Date.now();
-                    const response = await fetch(url, { cache: 'no-store' });
+                    const response = await fetch(url, { cache: 'no-store', mode: 'cors' });
                     if (!response.ok) continue;
 
                     const data = await response.json();
@@ -255,42 +280,26 @@
                     if (serverTimeMs !== null && rtt < minRTT) {
                         minRTT = rtt;
                         const latency = rtt / 2.0;
-                        const estimatedServerTimeAtEnd = serverTimeMs + latency;
-                        selectedOffset = estimatedServerTimeAtEnd - tEnd;
+                        selectedOffset = (serverTimeMs + latency) - tEnd;
+                        syncMethod = `API (${new URL(url).hostname})`;
+                        break;
                     }
                 } catch (err) {
-                    console.warn(`Time API endpoint failure (${url}):`, err);
+                    // Suppress per-endpoint console warnings when CORS/network fails
                 }
             }
         }
 
         if (minRTT !== Infinity) {
-            timeOffset = selectedOffset;
+            timeOffset = Math.round(selectedOffset);
             timeSyncLatency = Math.round(minRTT);
             isTimeSynced = true;
-            console.log(`Clock synchronized via API. Offset: ${timeOffset}ms, RTT: ${timeSyncLatency}ms`);
+            console.log(`Clock synchronized via ${syncMethod}. Offset: ${timeOffset}ms, RTT: ${timeSyncLatency}ms`);
         } else {
-            // Fallback: Estimate server time using HTTP HEAD response header Date
-            try {
-                const tStart = Date.now();
-                const headRes = await fetch(window.location.href, { method: 'HEAD', cache: 'no-store' });
-                const serverDateStr = headRes.headers.get('date');
-                const tEnd = Date.now();
-
-                if (serverDateStr) {
-                    const rtt = tEnd - tStart;
-                    const serverTimeMs = new Date(serverDateStr).getTime() + (rtt / 2.0);
-                    timeOffset = serverTimeMs - tEnd;
-                    timeSyncLatency = Math.round(rtt);
-                    isTimeSynced = true;
-                    console.log(`Clock synchronized via HTTP Date Header. Offset: ${timeOffset}ms`);
-                }
-            } catch (fallbackErr) {
-                console.error("Time synchronization failed entirely. Defaulting to local clock:", fallbackErr);
-                timeOffset = 0;
-                timeSyncLatency = 0;
-                isTimeSynced = false;
-            }
+            console.warn("Time synchronization unavailable. Defaulting to local device clock.");
+            timeOffset = 0;
+            timeSyncLatency = 0;
+            isTimeSynced = false;
         }
         updateTimeSyncHUD();
     }
@@ -679,9 +688,10 @@
                 disableDefaultUI: true,
                 uiOptions: {
                     sessionMode: 'immersive-ar',
-                    referenceSpaceType: 'local-floor'
+                    referenceSpaceType: 'local-floor',
+                    optionalFeatures: true
                 },
-                optionalFeatures: ['image-tracking']
+                optionalFeatures: true
             });
 
             const fm = xrExperience.baseExperience.featuresManager;
@@ -699,7 +709,8 @@
                             }
                         ]
                     },
-                    false
+                    true, // attachIfPossible
+                    false // required = false (Set as optional feature to prevent requestSession rejection on Meta Quest)
                 );
                 console.log("WebXR Image Tracking module successfully enabled.");
             } catch (imageTrackingErr) {
@@ -938,7 +949,12 @@
                         console.log("Starting native WebXR immersive-ar session...");
                         await xrExperience.baseExperience.enterXRAsync('immersive-ar', 'local-floor');
                     } catch (err) {
-                        console.error("Failed to enter WebXR Session:", err);
+                        console.warn("Primary enterXRAsync ('local-floor') failed, attempting fallback 'local' reference space:", err);
+                        try {
+                            await xrExperience.baseExperience.enterXRAsync('immersive-ar', 'local');
+                        } catch (fallbackErr) {
+                            console.error("Failed to enter WebXR Session:", fallbackErr);
+                        }
                     }
                 } else {
                     if (webcamActive) {
