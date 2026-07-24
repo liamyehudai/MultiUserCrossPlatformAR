@@ -622,12 +622,8 @@
                 // On portrait mobile streams (e.g. 720x1280), passing portrait dimensions distorts
                 // focal length scaling non-uniformly (2.37x distortion), inflating Z depth calculation.
                 // Always use landscape-oriented dimensions (max x min) for ARController camera parameters:
-                const isPortrait = vW < vH;
-                const arW = isPortrait ? Math.max(vW, vH) : vW;
-                const arH = isPortrait ? Math.min(vW, vH) : vH;
-
-                console.log(`Creating ARController with uniform camera dimensions ${arW}x${arH} (Portrait stream: ${isPortrait})...`);
-                arController = new window.ARController(arW, arH, paramInstance);
+                console.log(`Creating ARController with live video dimensions ${vW}x${vH}...`);
+                arController = new window.ARController(vW, vH, paramInstance);
                 if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_COLOR_AND_MATRIX !== undefined) {
                     arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR_AND_MATRIX);
                 } else if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR !== undefined) {
@@ -723,9 +719,10 @@
                 const isMatrixMatch = (markerInfo.idMatrix !== undefined && markerInfo.idMatrix >= 0);
 
                 if (isTemplateMatch || isMatrixMatch) {
-                    // Extract 3D transformation matrix (in normalized marker width units)
+                    // Pass marker width in millimeters to ARToolKit (e.g. 200mm for 20cm target)
+                    const markerWidthMM = selectedMarkerSizeMeters * 1000.0;
                     const markerMatrix = new Float32Array(12);
-                    arController.getTransMatSquare(i, 1.0, markerMatrix);
+                    arController.getTransMatSquare(i, markerWidthMM, markerMatrix);
 
                     const glMatrix = new Float32Array(16);
                     arController.transMatToGLMat(markerMatrix, glMatrix);
@@ -734,8 +731,8 @@
 
                     bjsMatrix.decompose(rawTargetScale, rawTargetRot, rawTargetPos);
 
-                    // Convert marker-width units to real-world meters using user-selected marker printout size
-                    rawTargetPos.scaleInPlace(selectedMarkerSizeMeters);
+                    // Convert ARToolKit millimeter pose translation to meters for Babylon space (1mm = 0.001m)
+                    rawTargetPos.scaleInPlace(0.001);
 
                     // Adjust Z depth for Babylon camera coordinate space
                     rawTargetPos.z = Math.abs(rawTargetPos.z);
