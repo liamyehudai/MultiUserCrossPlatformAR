@@ -619,7 +619,9 @@
 
                 console.log(`Creating ARController with dimensions ${w}x${h}...`);
                 arController = new window.ARController(w, h, paramInstance);
-                if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR !== undefined) {
+                if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_COLOR_AND_MATRIX !== undefined) {
+                    arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR_AND_MATRIX);
+                } else if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR !== undefined) {
                     arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR);
                 } else if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_COLOR !== undefined) {
                     arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR);
@@ -627,6 +629,11 @@
 
                 console.log("Loading optical marker pattern file (marker.patt)...");
                 arController.loadMarker('marker.patt', function(markerId) {
+                    if (markerId < 0) {
+                        console.warn("ARToolKit marker.patt loading returned invalid ID -1. Check pattern file format.");
+                        updateTrackingStatusBadge("Marker Pattern Load Error (-1)", "error");
+                        return;
+                    }
                     trackedMarkerId = markerId;
                     console.log("ARToolKit marker.patt successfully loaded with ID:", markerId);
                     updateTrackingStatusBadge("Point Camera at Marker...", "searching");
@@ -659,7 +666,11 @@
 
             for (let i = 0; i < markerNum; i++) {
                 const markerInfo = arController.getMarker(i);
-                if (trackedMarkerId !== null && (markerInfo.idPatt === trackedMarkerId || markerInfo.id === trackedMarkerId || (markerInfo.idPatt !== undefined && markerInfo.idPatt >= 0))) {
+                
+                const isTemplateMatch = (trackedMarkerId !== null && trackedMarkerId >= 0 && (markerInfo.idPatt === trackedMarkerId || markerInfo.id === trackedMarkerId));
+                const isMatrixMatch = (markerInfo.idMatrix !== undefined && markerInfo.idMatrix >= 0);
+
+                if (isTemplateMatch || isMatrixMatch) {
                     // Extract 3D transformation matrix for 20cm target marker
                     const markerMatrix = new Float32Array(12);
                     arController.getTransMatSquare(i, 0.2, markerMatrix);
