@@ -627,6 +627,9 @@
                     arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR);
                 }
 
+                // Sync JSARToolKit camera intrinsic projection matrix to Babylon active camera
+                updateWebCamCameraProjection();
+
                 console.log("Loading optical marker pattern file (marker.patt)...");
                 arController.loadMarker('marker.patt', function(markerId) {
                     if (markerId < 0) {
@@ -650,6 +653,37 @@
         } catch (e) {
             console.warn("Failed to initialize ARToolKit optical tracker:", e);
             captureLog('warn', ["ARToolKit init error: " + (e.message || e)]);
+        }
+    }
+
+    function updateWebCamCameraProjection() {
+        if (!isWebcamARActive || !arController || !scene || !scene.activeCamera) return;
+        const videoElem = document.getElementById('webcamVideoBg');
+        if (!videoElem || !videoElem.videoWidth || !videoElem.videoHeight) return;
+
+        try {
+            const projMatArr = arController.getCameraMatrix();
+            if (projMatArr && projMatArr.length === 16) {
+                const projMat = BABYLON.Matrix.FromArray(projMatArr);
+
+                // Compute aspect ratio crop factor for object-fit: cover
+                const screenAspect = window.innerWidth / window.innerHeight;
+                const videoAspect = videoElem.videoWidth / videoElem.videoHeight;
+
+                if (screenAspect < videoAspect) {
+                    // Vertical phone screen: left/right sides cropped out
+                    const cropScale = videoAspect / screenAspect;
+                    projMat.m[0] *= cropScale;
+                } else {
+                    // Wide screen: top/bottom cropped out
+                    const cropScale = screenAspect / videoAspect;
+                    projMat.m[5] *= cropScale;
+                }
+
+                scene.activeCamera.freezeProjectionMatrix(projMat);
+            }
+        } catch (e) {
+            console.warn("Failed to sync AR camera projection matrix:", e);
         }
     }
 
@@ -888,6 +922,14 @@
             canvas.style.zIndex = '1';
             if (scene) scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
 
+            // Switch active camera to dedicated optical AR target camera at origin (0,0,0)
+            let webcamCam = scene.getCameraByName("webcamARCamera");
+            if (!webcamCam) {
+                webcamCam = new BABYLON.TargetCamera("webcamARCamera", new BABYLON.Vector3(0, 0, 0), scene);
+                webcamCam.setTarget(new BABYLON.Vector3(0, 0, 1));
+            }
+            scene.activeCamera = webcamCam;
+
             // Initial positioning for 3D hologram anchor
             markerRoot.setEnabled(true);
             markerRoot.position.set(0, -0.15, 1.2);
@@ -922,6 +964,12 @@
         trackedMarkerId = null;
         isMarkerTrackedInWebcam = false;
 
+        if (scene && scene.activeCamera) {
+            scene.activeCamera.unfreezeProjectionMatrix();
+            const previewCam = scene.getCameraByName("previewCamera");
+            if (previewCam) scene.activeCamera = previewCam;
+        }
+
         canvas.style.backgroundColor = '';
         if (scene) scene.clearColor = new BABYLON.Color4(0.04, 0.05, 0.08, 1.0);
         isWebcamARActive = false;
@@ -933,7 +981,7 @@
     }
 
     function handleDeviceOrientation(event) {
-        if (!isWebcamARActive || !scene || !scene.activeCamera) return;
+        if (!isWebcamARActive || isMarkerTrackedInWebcam || !scene || !scene.activeCamera || scene.activeCamera.name !== "previewCamera") return;
         if (event.beta !== null && event.gamma !== null) {
             const pitch = BABYLON.Tools.ToRadians(event.beta - 45);
             const roll = BABYLON.Tools.ToRadians(event.gamma);
@@ -1068,7 +1116,61 @@
         });
     }
 
-    // Diagnostic Console Modal Renderers
+    // Diagnostic Console & Telemetry Exporter
+    function getDiagnosticTelemetryReport() {
+        const videoElem = document.getElementById('webcamVideoBg');
+        const screenW = window.innerWidth;
+        const screenH = window.innerHeight;
+        const screenAspect = (screenW / screenH).toFixed(3);
+        
+        let videoInfo = "N/A";
+        if (videoElem) {
+            const vW = videoElem.videoWidth || 0;
+            const vH = videoElem.videoHeight || 0;
+            const vAspect = vH ? (vW / vH).toFixed(3) : "N/A";
+            videoInfo = `${vW}x${vH} (Aspect: ${vAspect})`;
+        }
+
+        let trackingState = "Inactive";
+        if (xrExperience && xrExperience.baseExperience && xrExperience.baseExperience.state === BABYLON.WebXRState.IN_XR) {
+            trackingState = "Native WebXR Immersive-AR";
+        } else if (isWebcamARActive) {
+            trackingState = isMarkerTrackedInWebcam ? "JSARToolKit5 WebCam AR (Marker TRACKED)" : "JSARToolKit5 WebCam AR (Searching)";
+        }
+
+        let markerPosStr = "N/A";
+        let markerRotStr = "N/A";
+        if (markerRoot && markerRoot.isEnabled()) {
+            const p = markerRoot.position;
+            markerPosStr = `X: ${p.x.toFixed(3)}, Y: ${p.y.toFixed(3)}, Z: ${p.z.toFixed(3)}`;
+            if (markerRoot.rotationQuaternion) {
+                const e = markerRoot.rotationQuaternion.toEulerAngles();
+                markerRotStr = `Pitch: ${Math.round(BABYLON.Tools.ToDegrees(e.x))}°, Yaw: ${Math.round(BABYLON.Tools.ToDegrees(e.y))}°, Roll: ${Math.round(BABYLON.Tools.ToDegrees(e.z))}°`;
+            }
+        }
+
+        let camName = scene && scene.activeCamera ? scene.activeCamera.name : "None";
+        let isIOS = isIOSDevice();
+
+        const reportHeader = [
+            "=== CO-LOCATED SHARED AR DIAGNOSTIC TELEMETRY ===",
+            `Timestamp: ${new Date().toISOString()}`,
+            `Platform: ${navigator.platform} | iOS: ${isIOS} | UserAgent: ${navigator.userAgent}`,
+            `Screen Viewport: ${screenW}x${screenH} (DPR: ${window.devicePixelRatio}) | Aspect: ${screenAspect}`,
+            `Camera Stream: ${videoInfo}`,
+            `Tracking Mode: ${trackingState}`,
+            `Active Camera Node: ${camName}`,
+            `Marker Pose Position: ${markerPosStr}`,
+            `Marker Pose Rotation: ${markerRotStr}`,
+            `Clock Sync Offset: ${timeOffset}ms | Network RTT: ${timeSyncLatency}ms`,
+            "--------------------------------------------------",
+            "SYSTEM LOG HISTORY:"
+        ].join('\n');
+
+        const logText = logBuffer.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.message}`).join('\n');
+        return `${reportHeader}\n${logText}`;
+    }
+
     function openLogModal() {
         const existing = document.getElementById('logModal');
         if (existing) existing.remove();
@@ -1082,17 +1184,17 @@
             <div class="log-modal-card">
                 <button class="modal-close-btn" id="closeLogBtn">&times;</button>
                 <h3 style="margin-bottom: 8px; color: #FFF; display: flex; align-items: center; gap: 8px;">
-                    <span>📋 System Logs & Diagnostics</span>
+                    <span>📋 System Telemetry & Diagnostic Logs</span>
                 </h3>
                 <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px;">
-                    Use these logs to diagnose WebXR, tracking, or connection issues on mobile/Quest.
+                    Copy full telemetry and system logs to share camera, tracking, and render state for debugging.
                 </p>
                 <div class="log-console" id="logConsoleContainer">
                     ${renderLogLines()}
                 </div>
                 <div style="display: flex; gap: 10px; margin-top: 16px;">
                     <button class="btn-primary" style="padding: 10px 20px; font-size: 0.9rem;" id="copyLogsBtn">
-                        📋 Copy Logs
+                        📋 Copy Telemetry & Logs
                     </button>
                     <button class="btn-secondary" style="padding: 10px 20px; font-size: 0.9rem; width: auto;" id="clearLogsBtn">
                         Clear
@@ -1109,12 +1211,21 @@
             if (container) container.innerHTML = renderLogLines();
             updateLogBadgeUI();
         });
-        document.getElementById('copyLogsBtn')?.addEventListener('click', () => {
-            const logText = logBuffer.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.message}`).join('\n');
-            navigator.clipboard.writeText(logText);
+        document.getElementById('copyLogsBtn')?.addEventListener('click', async () => {
+            const fullReport = getDiagnosticTelemetryReport();
+            try {
+                await navigator.clipboard.writeText(fullReport);
+            } catch (e) {
+                const textArea = document.createElement('textarea');
+                textArea.value = fullReport;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                textArea.remove();
+            }
             const btn = document.getElementById('copyLogsBtn');
             btn.textContent = 'Copied!';
-            setTimeout(() => { btn.textContent = '📋 Copy Logs'; }, 2000);
+            setTimeout(() => { btn.textContent = '📋 Copy Telemetry & Logs'; }, 2000);
         });
 
         const container = document.getElementById('logConsoleContainer');
@@ -1197,6 +1308,7 @@
         // Handle Canvas Window Resize
         window.addEventListener('resize', () => {
             engine.resize();
+            updateWebCamCameraProjection();
         });
 
         // 4. Setup WebXR Experience & Dual Engine Fallback
