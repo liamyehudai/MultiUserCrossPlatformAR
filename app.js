@@ -559,7 +559,7 @@
     let isMarkerTrackedInWebcam = false;
 
     async function ensureARToolKitReady() {
-        if (window.artoolkit && window.artoolkit.setup && window.ARController) {
+        if (window.artoolkit && window.ARController && window.ARCameraParam) {
             return true;
         }
 
@@ -573,11 +573,11 @@
             let attempts = 0;
             const timer = setInterval(() => {
                 attempts++;
-                if (window.artoolkit && window.artoolkit.setup && window.ARController) {
+                if (window.artoolkit && window.ARController && window.ARCameraParam) {
                     clearInterval(timer);
                     window.removeEventListener('artoolkit-loaded', onLoaded);
                     resolve(true);
-                } else if (attempts > 50) {
+                } else if (attempts > 150) { // 15 seconds timeout for mobile network loading
                     clearInterval(timer);
                     window.removeEventListener('artoolkit-loaded', onLoaded);
                     resolve(false);
