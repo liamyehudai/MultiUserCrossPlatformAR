@@ -1156,6 +1156,77 @@
     }
 
     // Diagnostic Console & Telemetry Exporter
+    function getModelScreenDiagnosticData() {
+        if (!scene || !scene.activeCamera || !markerRoot || !markerRoot.isEnabled()) return null;
+
+        try {
+            const camera = scene.activeCamera;
+            const engine = scene.getEngine();
+            const renderWidth = engine.getRenderWidth();
+            const renderHeight = engine.getRenderHeight();
+
+            if (!renderWidth || !renderHeight) return null;
+
+            const viewport = camera.viewport.toGlobal(renderWidth, renderHeight);
+            const transformMatrix = scene.getTransformMatrix();
+
+            // Project 3D markerRoot position into 2D screen space (CSS pixels)
+            const projected = BABYLON.Vector3.Project(
+                markerRoot.position,
+                BABYLON.Matrix.Identity(),
+                transformMatrix,
+                viewport
+            );
+
+            // Scale to screen CSS pixels if Engine render resolution != window inner size
+            const cssScaleX = window.innerWidth / renderWidth;
+            const cssScaleY = window.innerHeight / renderHeight;
+
+            const screenX = Math.round(projected.x * cssScaleX);
+            const screenY = Math.round(projected.y * cssScaleY);
+            const screenW = window.innerWidth;
+            const screenH = window.innerHeight;
+
+            // Check depth and frustum conditions
+            const isBehindCamera = projected.z < 0 || projected.z > 1.0;
+            const isOnScreen = !isBehindCamera &&
+                               (screenX >= -50 && screenX <= screenW + 50) &&
+                               (screenY >= -50 && screenY <= screenH + 50);
+
+            // Calculate approximate model bounding radius on screen (in pixels)
+            const offsetPos = markerRoot.position.add(new BABYLON.Vector3(0, 0.15, 0));
+            const topProjected = BABYLON.Vector3.Project(
+                offsetPos,
+                BABYLON.Matrix.Identity(),
+                transformMatrix,
+                viewport
+            );
+            const pixelRadius = Math.abs(screenY - Math.round(topProjected.y * cssScaleY));
+            const pixelDiameter = Math.round(pixelRadius * 2);
+
+            const distToCam = BABYLON.Vector3.Distance(camera.position, markerRoot.position).toFixed(2);
+            const minZ = camera.minZ !== undefined ? camera.minZ.toFixed(2) : "0.10";
+            const maxZ = camera.maxZ !== undefined ? camera.maxZ.toFixed(2) : "1000";
+
+            return {
+                screenX,
+                screenY,
+                screenW,
+                screenH,
+                isOnScreen,
+                isBehindCamera,
+                zDepth: markerRoot.position.z.toFixed(3),
+                distToCam,
+                minZ,
+                maxZ,
+                pixelDiameter,
+                projectedZ: projected.z.toFixed(3)
+            };
+        } catch (e) {
+            return null;
+        }
+    }
+
     function getDiagnosticTelemetryReport() {
         const videoElem = document.getElementById('webcamVideoBg');
         const screenW = window.innerWidth;
@@ -1191,6 +1262,19 @@
         let camName = scene && scene.activeCamera ? scene.activeCamera.name : "None";
         let isIOS = isIOSDevice();
 
+        let screenProjStr = "N/A";
+        let screenVisStr = "N/A";
+        let camDepthStr = "N/A";
+        let modelScaleSizeStr = "N/A";
+
+        const diagData = getModelScreenDiagnosticData();
+        if (diagData) {
+            screenProjStr = `X: ${diagData.screenX}px, Y: ${diagData.screenY}px (Viewport: ${diagData.screenW}x${diagData.screenH})`;
+            screenVisStr = `On Screen: ${diagData.isOnScreen ? 'YES ✅' : 'NO ❌'} | Behind Lens: ${diagData.isBehindCamera ? 'YES ⚠️' : 'NO ✅'}`;
+            camDepthStr = `Distance: ${diagData.distToCam}m | Z-Depth: ${diagData.zDepth}m | Clip Range: [${diagData.minZ}m - ${diagData.maxZ}m]`;
+            modelScaleSizeStr = `~${diagData.pixelDiameter}px diameter`;
+        }
+
         const reportHeader = [
             "=== CO-LOCATED SHARED AR DIAGNOSTIC TELEMETRY ===",
             `Timestamp: ${new Date().toISOString()}`,
@@ -1202,6 +1286,10 @@
             `Active Camera Node: ${camName}`,
             `Marker Pose Position: ${markerPosStr}`,
             `Marker Pose Rotation: ${markerRotStr}`,
+            `Screen Projection Position: ${screenProjStr}`,
+            `Screen Visibility Status: ${screenVisStr}`,
+            `Camera Distance & Depth: ${camDepthStr}`,
+            `Screen Model Render Diameter: ${modelScaleSizeStr}`,
             `Clock Sync Offset: ${timeOffset}ms | Network RTT: ${timeSyncLatency}ms`,
             "--------------------------------------------------",
             "SYSTEM LOG HISTORY:"
