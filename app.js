@@ -612,14 +612,17 @@
         try {
             console.log(`Video dimensions ready: ${videoElem.videoWidth}x${videoElem.videoHeight}. Loading ARCameraParam...`);
             
-            let cameraParam = new window.ARCameraParam();
-            const onLoadCallback = function() {
-                const paramInstance = this || cameraParam;
+            function initARControllerWithParam(paramInstance) {
                 const vW = videoElem.videoWidth || 640;
                 const vH = videoElem.videoHeight || 480;
 
                 console.log(`Creating ARController with live video dimensions ${vW}x${vH}...`);
-                arController = new window.ARController(vW, vH, paramInstance);
+                if (paramInstance) {
+                    arController = new window.ARController(vW, vH, paramInstance);
+                } else {
+                    arController = new window.ARController(vW, vH);
+                }
+
                 if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_COLOR_AND_MATRIX !== undefined) {
                     arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR_AND_MATRIX);
                 } else if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR !== undefined) {
@@ -642,15 +645,17 @@
                     console.log("ARToolKit marker.patt successfully loaded with ID:", markerId);
                     updateTrackingStatusBadge("Point Camera at Marker...", "searching");
                 });
-            };
+            }
 
-            cameraParam = new window.ARCameraParam(
-                'camera_para.dat',
-                onLoadCallback,
-                function(err) {
-                    console.warn("ARCameraParam error:", err);
-                }
-            );
+            let cameraParam = new window.ARCameraParam();
+            cameraParam.onload = function() {
+                initARControllerWithParam(this || cameraParam);
+            };
+            cameraParam.onerror = function(err) {
+                console.warn("ARCameraParam load notice, using default camera parameters:", err);
+                initARControllerWithParam(null);
+            };
+            cameraParam.load('camera_para.dat');
         } catch (e) {
             console.warn("Failed to initialize ARToolKit optical tracker:", e);
             captureLog('warn', ["ARToolKit init error: " + (e.message || e)]);
