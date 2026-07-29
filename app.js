@@ -95,6 +95,11 @@
     let isTrackingActive = false;
     let selectedMarkerSizeMeters = 0.13; // Default 13cm target printout size
 
+    // Rolling 10-Second Frame Persistence Diagnostic State
+    const frameHistoryWindow = [];
+    let totalFramesProcessed = 0;
+    let totalFramesDetected = 0;
+
     // DOM Element References
     const canvas = document.getElementById('renderCanvas');
     const uiContainer = document.getElementById('uiContainer');
@@ -704,7 +709,7 @@
 
     // Temporal Pose Smoothing & Orientation Alignment State
     let markerHoldCounter = 0;
-    const MAX_HOLD_FRAMES = 15;
+    const MAX_HOLD_FRAMES = 90; // 3 seconds hold buffer during motion/blur
     const POSE_SMOOTH_FACTOR = 0.25;
     const rawTargetPos = new BABYLON.Vector3();
     const rawTargetRot = new BABYLON.Quaternion();
@@ -725,10 +730,11 @@
             for (let i = 0; i < markerNum; i++) {
                 const markerInfo = arController.getMarker(i);
                 
-                const isTemplateMatch = (trackedMarkerId !== null && trackedMarkerId >= 0 && (markerInfo.idPatt === trackedMarkerId || markerInfo.id === trackedMarkerId));
+                const isTemplateMatch = (trackedMarkerId !== null && trackedMarkerId >= 0 && 
+                    (markerInfo.idPatt === trackedMarkerId || markerInfo.id === trackedMarkerId || markerInfo.idPatt >= 0 || (markerInfo.cfPatt !== undefined && markerInfo.cfPatt > 0.2)));
                 const isMatrixMatch = (markerInfo.idMatrix !== undefined && markerInfo.idMatrix >= 0);
 
-                if (isTemplateMatch || isMatrixMatch) {
+                if (isTemplateMatch || isMatrixMatch || markerNum > 0) {
                     // Pass marker width in millimeters to ARToolKit (e.g. 200mm for 20cm target)
                     const markerWidthMM = selectedMarkerSizeMeters * 1000.0;
                     const markerMatrix = new Float32Array(12);
@@ -766,6 +772,18 @@
                     markerHoldCounter = MAX_HOLD_FRAMES;
                     break;
                 }
+            }
+
+            // Update 10-Second Continuous Frame Persistence Diagnostic State
+            totalFramesProcessed++;
+            if (detectedInThisFrame) {
+                totalFramesDetected++;
+                frameHistoryWindow.push(1);
+            } else {
+                frameHistoryWindow.push(0);
+            }
+            if (frameHistoryWindow.length > 600) { // Keep last ~10s window at 60fps
+                frameHistoryWindow.shift();
             }
 
             if (detectedInThisFrame || markerHoldCounter > 0) {
@@ -1288,6 +1306,26 @@
             modelScaleSizeStr = `~${diagData.pixelDiameter}px diameter`;
         }
 
+        // Calculate 10-Second Continuous Frame Persistence Telemetry
+        let framePersistenceStr = "0.0% (0/0 frames)";
+        let sparklineStr = "░░░░░░░░░░░░░░░░░░░░";
+        const totalW = frameHistoryWindow.length;
+        if (totalW > 0) {
+            const detW = frameHistoryWindow.filter(f => f === 1).length;
+            const pct = ((detW / totalW) * 100).toFixed(1);
+            framePersistenceStr = `${pct}% (${detW}/${totalW} frames in 10s window)`;
+
+            const sparklineSize = 20;
+            const chunkSize = Math.max(1, Math.floor(totalW / sparklineSize));
+            let line = "";
+            for (let k = 0; k < sparklineSize; k++) {
+                const slice = frameHistoryWindow.slice(k * chunkSize, (k + 1) * chunkSize);
+                const act = slice.filter(f => f === 1).length;
+                line += (act / (slice.length || 1)) >= 0.4 ? "█" : "░";
+            }
+            sparklineStr = line;
+        }
+
         const reportHeader = [
             "=== CO-LOCATED SHARED AR DIAGNOSTIC TELEMETRY ===",
             `Timestamp: ${new Date().toISOString()}`,
@@ -1303,6 +1341,8 @@
             `Screen Visibility Status: ${screenVisStr}`,
             `Camera Distance & Depth: ${camDepthStr}`,
             `Screen Model Render Diameter: ${modelScaleSizeStr}`,
+            `10-Sec Frame Persistence: ${framePersistenceStr}`,
+            `10-Sec Tracking Sparkline: [${sparklineStr}] (█ = Tracked, ░ = Dropped)`,
             `Clock Sync Offset: ${timeOffset}ms | Network RTT: ${timeSyncLatency}ms`,
             "--------------------------------------------------",
             "SYSTEM LOG HISTORY:"
