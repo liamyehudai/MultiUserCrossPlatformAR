@@ -697,11 +697,17 @@
     const rawTargetScale = new BABYLON.Vector3();
     const alignX90 = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.X, Math.PI / 2);
 
+    let lastVideoFrameTime = -1;
+
     function processOpticalMarkerFrame() {
         if (!isWebcamARActive || !arController) return;
 
         const videoElem = document.getElementById('webcamVideoBg');
         if (!videoElem || videoElem.readyState < 2) return;
+
+        // Skip processing duplicate frames if WebKit camera video decoder has not advanced
+        if (videoElem.currentTime === lastVideoFrameTime) return;
+        lastVideoFrameTime = videoElem.currentTime;
 
         try {
             arController.process(videoElem);
