@@ -644,8 +644,13 @@
                 });
             };
 
-            cameraParam.onload = onLoadCallback;
-            cameraParam.load('camera_para.dat');
+            cameraParam = new window.ARCameraParam(
+                'camera_para.dat',
+                onLoadCallback,
+                function(err) {
+                    console.warn("ARCameraParam error:", err);
+                }
+            );
         } catch (e) {
             console.warn("Failed to initialize ARToolKit optical tracker:", e);
             captureLog('warn', ["ARToolKit init error: " + (e.message || e)]);
@@ -752,9 +757,9 @@
                 // Align 3D hologram flat on desk horizontal plane (90deg X rotation offset)
                 rawTargetRot.multiplyInPlace(alignX90);
 
-                // Outlier jump rejection: reject single-frame pose teleports (> 0.60m)
+                // Outlier jump rejection: reject single-frame pose teleports (> 1.50m)
                 const distJump = BABYLON.Vector3.Distance(markerRoot.position, rawTargetPos);
-                if (!isMarkerTrackedInWebcam || distJump < 0.60) {
+                if (!isMarkerTrackedInWebcam || distJump < 1.50) {
                     detectedInThisFrame = true;
                     markerHoldCounter = MAX_HOLD_FRAMES;
                 }
