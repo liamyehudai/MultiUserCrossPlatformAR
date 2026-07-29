@@ -613,10 +613,16 @@
             console.log(`Video dimensions ready: ${videoElem.videoWidth}x${videoElem.videoHeight}. Loading ARCameraParam...`);
             
             function initARControllerWithParam(paramInstance) {
-                const vW = videoElem.videoWidth || 640;
-                const vH = videoElem.videoHeight || 480;
+                const rawW = videoElem.videoWidth || 640;
+                const rawH = videoElem.videoHeight || 480;
 
-                console.log(`Creating ARController with live video dimensions ${vW}x${vH}...`);
+                // ARToolKit camera_para.dat is calibrated for landscape aspect ratio (640x480).
+                // Passing portrait dimensions (720x1280) distorts focal length matrix by 2.37x,
+                // inflating Z depth to 119m. Always use landscape orientation dimensions (Max x Min):
+                const vW = Math.max(rawW, rawH);
+                const vH = Math.min(rawW, rawH);
+
+                console.log(`Creating ARController with landscape dimensions ${vW}x${vH} (raw: ${rawW}x${rawH})...`);
                 if (paramInstance) {
                     arController = new window.ARController(vW, vH, paramInstance);
                 } else {
@@ -791,9 +797,13 @@
                     markerRoot.rotationQuaternion = rawTargetRot.clone();
                 }
 
-                // Apply Exponential Moving Average (EMA) Pose Smoothing (0.15 for rock-solid stability)
-                const POSE_SMOOTH = 0.15;
-                markerRoot.position = BABYLON.Vector3.Lerp(markerRoot.position, rawTargetPos, POSE_SMOOTH);
+                // Deadband filtering: ignore tiny sub-pixel sensor jitter (< 8mm) when holding phone still
+                const posDelta = BABYLON.Vector3.Distance(markerRoot.position, rawTargetPos);
+                const targetPosToApply = (isMarkerTrackedInWebcam && posDelta < 0.008) ? markerRoot.position : rawTargetPos;
+
+                // Apply Exponential Moving Average (EMA) Pose Smoothing (0.12 for rock-solid stability)
+                const POSE_SMOOTH = 0.12;
+                markerRoot.position = BABYLON.Vector3.Lerp(markerRoot.position, targetPosToApply, POSE_SMOOTH);
                 markerRoot.rotationQuaternion = BABYLON.Quaternion.Slerp(markerRoot.rotationQuaternion, rawTargetRot, POSE_SMOOTH);
 
                 markerRoot.setEnabled(true);
