@@ -842,11 +842,7 @@
                 }
             }
 
-            if (detectedInThisFrame || markerHoldCounter > 0) {
-                if (!detectedInThisFrame) {
-                    markerHoldCounter--; // Hold pose during brief frame drops
-                }
-
+            if (detectedInThisFrame) {
                 if (!markerRoot.rotationQuaternion) {
                     markerRoot.rotationQuaternion = rawTargetRot.clone();
                 }
@@ -855,8 +851,8 @@
                 const posDelta = BABYLON.Vector3.Distance(markerRoot.position, rawTargetPos);
                 const targetPosToApply = (isMarkerTrackedInWebcam && posDelta < 0.008) ? markerRoot.position : rawTargetPos;
 
-                // Apply Exponential Moving Average (EMA) Pose Smoothing (0.12 for rock-solid stability)
-                const POSE_SMOOTH = 0.12;
+                // Apply Exponential Moving Average (EMA) Pose Smoothing (0.15 for rock-solid stability)
+                const POSE_SMOOTH = 0.15;
                 markerRoot.position = BABYLON.Vector3.Lerp(markerRoot.position, targetPosToApply, POSE_SMOOTH);
                 markerRoot.rotationQuaternion = BABYLON.Quaternion.Slerp(markerRoot.rotationQuaternion, rawTargetRot, POSE_SMOOTH);
 
@@ -872,6 +868,8 @@
                 const yawDeg = Math.round(BABYLON.Tools.ToDegrees(euler.y));
 
                 updateTrackingStatusBadge(`Synced AR [P:${posX},${posY},${posZ}m | Rot:${pitchDeg}°/${yawDeg}°]`, "synced");
+            } else if (markerHoldCounter > 0) {
+                markerHoldCounter--; // Hold previous valid pose steady during brief frame drops
             } else if (isMarkerTrackedInWebcam) {
                 updateTrackingStatusBadge("Searching for Optical Marker...", "searching");
             }
