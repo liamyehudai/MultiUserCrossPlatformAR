@@ -610,23 +610,14 @@
         }
 
         try {
-            console.log(`Video dimensions ready: ${videoElem.videoWidth}x${videoElem.videoHeight}. Pre-fetching camera parameters...`);
+            console.log(`Video dimensions ready: ${videoElem.videoWidth}x${videoElem.videoHeight}. Loading ARCameraParam...`);
             
-            // Pre-fetch camera parameter file to Uint8Array to bypass XMLHttpRequest issues
-            const cameraRes = await fetch('camera_para.dat');
-            if (!cameraRes.ok) throw new Error("Failed to fetch camera_para.dat: " + cameraRes.status);
-            const cameraBuf = new Uint8Array(await cameraRes.arrayBuffer());
-
-            let cameraParam = null;
+            let cameraParam = new window.ARCameraParam();
             const onLoadCallback = function() {
                 const paramInstance = this || cameraParam;
                 const vW = videoElem.videoWidth || 640;
                 const vH = videoElem.videoHeight || 480;
 
-                // JSARToolKit camera_para.dat is calibrated for landscape aspect ratio (640x480).
-                // On portrait mobile streams (e.g. 720x1280), passing portrait dimensions distorts
-                // focal length scaling non-uniformly (2.37x distortion), inflating Z depth calculation.
-                // Always use landscape-oriented dimensions (max x min) for ARController camera parameters:
                 console.log(`Creating ARController with live video dimensions ${vW}x${vH}...`);
                 arController = new window.ARController(vW, vH, paramInstance);
                 if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_COLOR_AND_MATRIX !== undefined) {
@@ -653,13 +644,8 @@
                 });
             };
 
-            cameraParam = new window.ARCameraParam(
-                cameraBuf,
-                onLoadCallback,
-                function(err) {
-                    console.error("Error loading ARCameraParam:", err);
-                }
-            );
+            cameraParam.onload = onLoadCallback;
+            cameraParam.load('camera_para.dat');
         } catch (e) {
             console.warn("Failed to initialize ARToolKit optical tracker:", e);
             captureLog('warn', ["ARToolKit init error: " + (e.message || e)]);
