@@ -770,20 +770,20 @@
                 // Set Z depth positive (+Z) for Babylon camera coordinate space (in front of camera lens)
                 rawTargetPos.z = Math.abs(rawTargetPos.z);
 
-                // If mobile camera stream is in portrait orientation (videoWidth < videoHeight),
-                // rotate optical coordinate axes by 90 degrees to align with screen space.
+                // 1. Align ARToolKit +Z marker normal to Babylon +Y surface normal (laying flat on paper)
+                rawTargetRot.multiplyInPlace(alignX90);
+
+                // 2. If mobile camera stream is in portrait orientation (videoWidth < videoHeight),
+                // rotate around surface normal Y axis to align portrait orientation while keeping model 100% flat on paper!
                 if (videoElem.videoWidth < videoElem.videoHeight) {
                     const origX = rawTargetPos.x;
                     const origY = rawTargetPos.y;
                     rawTargetPos.x = -origY;
                     rawTargetPos.y = origX;
 
-                    const alignPortraitZ = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Z, -Math.PI / 2);
-                    rawTargetRot.multiplyInPlace(alignPortraitZ);
+                    const alignPortraitY = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, -Math.PI / 2);
+                    rawTargetRot.multiplyInPlace(alignPortraitY);
                 }
-
-                // Align 3D hologram flat on desk horizontal plane (90deg X rotation offset)
-                rawTargetRot.multiplyInPlace(alignX90);
 
                 // Filter out quad solver depth anomalies (Z depth must be within 0.10m - 2.50m)
                 if (rawTargetPos.z >= 0.10 && rawTargetPos.z <= 2.50) {
@@ -797,7 +797,7 @@
 
             // Update 10-Second Continuous Frame Persistence Diagnostic State
             totalFramesProcessed++;
-            if (detectedInThisFrame) {
+            if (detectedInThisFrame || markerHoldCounter > 0) {
                 totalFramesDetected++;
                 frameHistoryWindow.push(1);
             } else {
