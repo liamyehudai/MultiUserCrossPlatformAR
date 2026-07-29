@@ -685,6 +685,16 @@
                     projMat.m[5] *= cropScale;
                 }
 
+                // Ensure camera near clipping plane minZ is 0.01m (1cm) so close objects are never clipped
+                scene.activeCamera.minZ = 0.01;
+                scene.activeCamera.maxZ = 100.0;
+
+                // Adjust matrix near/far clipping plane elements for Babylon 0.01m to 100.0m range
+                const near = 0.01;
+                const far = 100.0;
+                projMat.m[10] = -(far + near) / (far - near);
+                projMat.m[14] = -(2 * far * near) / (far - near);
+
                 scene.activeCamera.freezeProjectionMatrix(projMat);
             }
         } catch (e) {
@@ -734,8 +744,8 @@
                     // Convert ARToolKit millimeter pose translation to meters for Babylon space (1mm = 0.001m)
                     rawTargetPos.scaleInPlace(0.001);
 
-                    // Adjust Z depth for OpenGL camera coordinate space (negative Z in front of camera lens)
-                    rawTargetPos.z = -Math.abs(rawTargetPos.z);
+                    // Set Z depth positive (+Z) for Babylon camera coordinate space (in front of camera lens)
+                    rawTargetPos.z = Math.abs(rawTargetPos.z);
 
                     // If mobile camera stream is in portrait orientation (videoWidth < videoHeight),
                     // rotate optical coordinate axes by 90 degrees to align with screen space.
@@ -943,17 +953,19 @@
             canvas.style.zIndex = '1';
             if (scene) scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
 
-            // Switch active camera to dedicated optical AR target camera at origin (0,0,0) looking down -Z
+            // Switch active camera to dedicated optical AR target camera at origin (0,0,0) looking down +Z
             let webcamCam = scene.getCameraByName("webcamARCamera");
             if (!webcamCam) {
                 webcamCam = new BABYLON.TargetCamera("webcamARCamera", new BABYLON.Vector3(0, 0, 0), scene);
-                webcamCam.setTarget(new BABYLON.Vector3(0, 0, -1));
+                webcamCam.minZ = 0.01;
+                webcamCam.maxZ = 100.0;
+                webcamCam.setTarget(new BABYLON.Vector3(0, 0, 1));
             }
             scene.activeCamera = webcamCam;
 
             // Initial positioning for 3D hologram anchor (in front of camera lens)
             markerRoot.setEnabled(true);
-            markerRoot.position.set(0, -0.15, -1.2);
+            markerRoot.position.set(0, -0.15, 1.2);
 
             // Initialize JSARToolKit5 optical marker tracking
             initOpticalMarkerTracking();
