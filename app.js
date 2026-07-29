@@ -741,8 +741,12 @@
                 const cf = (markerInfo.cfPatt !== undefined && markerInfo.cfPatt > 0) ? markerInfo.cfPatt : 
                            ((markerInfo.cf !== undefined && markerInfo.cf > 0) ? markerInfo.cf : 0.5);
 
-                const isMatch = (trackedMarkerId !== null && trackedMarkerId >= 0 && 
-                    (markerInfo.idPatt === trackedMarkerId || markerInfo.id === trackedMarkerId || markerInfo.idPatt >= 0 || cf > 0.2));
+                // Strict pattern match for registered marker.patt (trackedMarkerId = 0, cfPatt >= 0.50)
+                const isPattMatch = (trackedMarkerId !== null && trackedMarkerId >= 0 && 
+                    (markerInfo.idPatt === trackedMarkerId || markerInfo.id === trackedMarkerId));
+                const confidenceOK = (markerInfo.cfPatt !== undefined && markerInfo.cfPatt > 0) ? (markerInfo.cfPatt >= 0.50) : (cf >= 0.50);
+
+                const isMatch = isPattMatch && confidenceOK;
 
                 if (isMatch && cf > highestConfidence) {
                     highestConfidence = cf;
@@ -870,8 +874,11 @@
                 updateTrackingStatusBadge(`Synced AR [P:${posX},${posY},${posZ}m | Rot:${pitchDeg}°/${yawDeg}°]`, "synced");
             } else if (markerHoldCounter > 0) {
                 markerHoldCounter--; // Hold previous valid pose steady during brief frame drops
-            } else if (isMarkerTrackedInWebcam) {
-                updateTrackingStatusBadge("Searching for Optical Marker...", "searching");
+            } else {
+                markerRoot.setEnabled(false); // Hide 3D model when marker is NOT in view
+                if (isMarkerTrackedInWebcam) {
+                    updateTrackingStatusBadge("Searching for Optical Marker...", "searching");
+                }
             }
         } catch (err) {
             // Ignore frame processing jitter
