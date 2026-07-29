@@ -676,31 +676,12 @@
             if (projMatArr && projMatArr.length === 16) {
                 const projMat = BABYLON.Matrix.FromArray(projMatArr);
 
-                // Compute aspect ratio crop factor for object-fit: cover
-                const screenAspect = window.innerWidth / window.innerHeight;
-                const videoAspect = videoElem.videoWidth / videoElem.videoHeight;
-
-                if (screenAspect < videoAspect) {
-                    // Vertical phone screen: left/right sides cropped out
-                    const cropScale = videoAspect / screenAspect;
-                    projMat.m[0] *= cropScale;
-                } else {
-                    // Wide screen: top/bottom cropped out
-                    const cropScale = screenAspect / videoAspect;
-                    projMat.m[5] *= cropScale;
-                }
-
-                // Ensure camera near clipping plane minZ is 0.01m (1cm) so close objects are never clipped
+                // Configure camera FOV and near/far clipping range for WebCam AR
                 scene.activeCamera.minZ = 0.01;
                 scene.activeCamera.maxZ = 100.0;
-
-                // Adjust matrix near/far clipping plane elements for Babylon 0.01m to 100.0m range
-                const near = 0.01;
-                const far = 100.0;
-                projMat.m[10] = -(far + near) / (far - near);
-                projMat.m[14] = -(2 * far * near) / (far - near);
-
-                scene.activeCamera.freezeProjectionMatrix(projMat);
+                scene.activeCamera.fovMode = BABYLON.Camera.FOVMODE_VERTICAL_FIXED;
+                scene.activeCamera.fov = BABYLON.Tools.ToRadians(45);
+                scene.activeCamera.unfreezeProjectionMatrix();
             }
         } catch (e) {
             console.warn("Failed to sync AR camera projection matrix:", e);
@@ -1326,6 +1307,22 @@
             sparklineStr = line;
         }
 
+        // Sample WebGL Canvas pixels at projected position to verify active 3D pixel rendering
+        let glPixelStatusStr = "Unknown";
+        try {
+            const gl = engine._gl;
+            if (gl && diagData) {
+                const px = new Uint8Array(4);
+                const rx = Math.max(0, Math.min(engine.getRenderWidth() - 1, Math.floor(diagData.screenX * (engine.getRenderWidth() / window.innerWidth))));
+                const ry = Math.max(0, Math.min(engine.getRenderHeight() - 1, Math.floor((window.innerHeight - diagData.screenY) * (engine.getRenderHeight() / window.innerHeight))));
+                gl.readPixels(rx, ry, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+                const hasColor = (px[0] > 0 || px[1] > 0 || px[2] > 0 || px[3] > 0);
+                glPixelStatusStr = hasColor ? `Active 3D Pixels Detected (RGBA: ${px[0]},${px[1]},${px[2]},${px[3]})` : "0 Pixels Detected (Transparent/Hidden)";
+            }
+        } catch (e) {
+            glPixelStatusStr = "Pixel Inspection Unavailable";
+        }
+
         const reportHeader = [
             "=== CO-LOCATED SHARED AR DIAGNOSTIC TELEMETRY ===",
             `Timestamp: ${new Date().toISOString()}`,
@@ -1339,6 +1336,7 @@
             `Marker Pose Rotation: ${markerRotStr}`,
             `Screen Projection Position: ${screenProjStr}`,
             `Screen Visibility Status: ${screenVisStr}`,
+            `WebGL Canvas Pixel Inspection: ${glPixelStatusStr}`,
             `Camera Distance & Depth: ${camDepthStr}`,
             `Screen Model Render Diameter: ${modelScaleSizeStr}`,
             `10-Sec Frame Persistence: ${framePersistenceStr}`,
@@ -1541,8 +1539,13 @@
         // 2. Perform Network Time Synchronization
         await synchronizeClock();
 
-        // 3. Initialize Babylon Engine & 3D Scene
-        engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+        // 3. Initialize Babylon Engine & 3D Scene with explicit WebGL transparent alpha compositing
+        engine = new BABYLON.Engine(canvas, true, { 
+            preserveDrawingBuffer: true, 
+            stencil: true, 
+            alpha: true, 
+            premultipliedAlpha: false 
+        });
         scene = createScene();
 
         // Start Babylon Render Loop
