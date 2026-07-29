@@ -700,50 +700,63 @@
             const markerNum = arController.getMarkerNum();
             let detectedInThisFrame = false;
 
+            let bestCandidateIndex = -1;
+            let highestConfidence = -1;
+
             for (let i = 0; i < markerNum; i++) {
                 const markerInfo = arController.getMarker(i);
-                
-                const isTemplateMatch = (trackedMarkerId !== null && trackedMarkerId >= 0 && 
-                    (markerInfo.idPatt === trackedMarkerId || markerInfo.id === trackedMarkerId || markerInfo.idPatt >= 0 || (markerInfo.cfPatt !== undefined && markerInfo.cfPatt > 0.2)));
-                const isMatrixMatch = (markerInfo.idMatrix !== undefined && markerInfo.idMatrix >= 0);
+                const cf = (markerInfo.cfPatt !== undefined && markerInfo.cfPatt > 0) ? markerInfo.cfPatt : 
+                           ((markerInfo.cf !== undefined && markerInfo.cf > 0) ? markerInfo.cf : 0.5);
 
-                if (isTemplateMatch || isMatrixMatch || markerNum > 0) {
-                    // Pass marker width in millimeters to ARToolKit (e.g. 200mm for 20cm target)
-                    const markerWidthMM = selectedMarkerSizeMeters * 1000.0;
-                    const markerMatrix = new Float32Array(12);
-                    arController.getTransMatSquare(i, markerWidthMM, markerMatrix);
+                const isMatch = (trackedMarkerId !== null && trackedMarkerId >= 0 && 
+                    (markerInfo.idPatt === trackedMarkerId || markerInfo.id === trackedMarkerId || markerInfo.idPatt >= 0 || cf > 0.2));
 
-                    const glMatrix = new Float32Array(16);
-                    arController.transMatToGLMat(markerMatrix, glMatrix);
+                if (isMatch && cf > highestConfidence) {
+                    highestConfidence = cf;
+                    bestCandidateIndex = i;
+                }
+            }
 
-                    const bjsMatrix = BABYLON.Matrix.FromArray(glMatrix);
+            if (bestCandidateIndex >= 0) {
+                const i = bestCandidateIndex;
+                // Pass marker width in millimeters to ARToolKit (e.g. 130mm for 13cm target)
+                const markerWidthMM = selectedMarkerSizeMeters * 1000.0;
+                const markerMatrix = new Float32Array(12);
+                arController.getTransMatSquare(i, markerWidthMM, markerMatrix);
 
-                    bjsMatrix.decompose(rawTargetScale, rawTargetRot, rawTargetPos);
+                const glMatrix = new Float32Array(16);
+                arController.transMatToGLMat(markerMatrix, glMatrix);
 
-                    // Convert ARToolKit millimeter pose translation to meters for Babylon space (1mm = 0.001m)
-                    rawTargetPos.scaleInPlace(0.001);
+                const bjsMatrix = BABYLON.Matrix.FromArray(glMatrix);
 
-                    // Set Z depth positive (+Z) for Babylon camera coordinate space (in front of camera lens)
-                    rawTargetPos.z = Math.abs(rawTargetPos.z);
+                bjsMatrix.decompose(rawTargetScale, rawTargetRot, rawTargetPos);
 
-                    // If mobile camera stream is in portrait orientation (videoWidth < videoHeight),
-                    // rotate optical coordinate axes by 90 degrees to align with screen space.
-                    if (videoElem.videoWidth < videoElem.videoHeight) {
-                        const origX = rawTargetPos.x;
-                        const origY = rawTargetPos.y;
-                        rawTargetPos.x = -origY;
-                        rawTargetPos.y = origX;
+                // Convert ARToolKit millimeter pose translation to meters for Babylon space (1mm = 0.001m)
+                rawTargetPos.scaleInPlace(0.001);
 
-                        const alignPortraitZ = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Z, -Math.PI / 2);
-                        rawTargetRot.multiplyInPlace(alignPortraitZ);
-                    }
+                // Set Z depth positive (+Z) for Babylon camera coordinate space (in front of camera lens)
+                rawTargetPos.z = Math.abs(rawTargetPos.z);
 
-                    // Align 3D hologram flat on desk horizontal plane (90deg X rotation offset)
-                    rawTargetRot.multiplyInPlace(alignX90);
+                // If mobile camera stream is in portrait orientation (videoWidth < videoHeight),
+                // rotate optical coordinate axes by 90 degrees to align with screen space.
+                if (videoElem.videoWidth < videoElem.videoHeight) {
+                    const origX = rawTargetPos.x;
+                    const origY = rawTargetPos.y;
+                    rawTargetPos.x = -origY;
+                    rawTargetPos.y = origX;
 
+                    const alignPortraitZ = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Z, -Math.PI / 2);
+                    rawTargetRot.multiplyInPlace(alignPortraitZ);
+                }
+
+                // Align 3D hologram flat on desk horizontal plane (90deg X rotation offset)
+                rawTargetRot.multiplyInPlace(alignX90);
+
+                // Outlier jump rejection: reject single-frame pose teleports (> 0.60m)
+                const distJump = BABYLON.Vector3.Distance(markerRoot.position, rawTargetPos);
+                if (!isMarkerTrackedInWebcam || distJump < 0.60) {
                     detectedInThisFrame = true;
                     markerHoldCounter = MAX_HOLD_FRAMES;
-                    break;
                 }
             }
 
@@ -768,9 +781,10 @@
                     markerRoot.rotationQuaternion = rawTargetRot.clone();
                 }
 
-                // Apply Exponential Moving Average (EMA) Pose Smoothing
-                markerRoot.position = BABYLON.Vector3.Lerp(markerRoot.position, rawTargetPos, POSE_SMOOTH_FACTOR);
-                markerRoot.rotationQuaternion = BABYLON.Quaternion.Slerp(markerRoot.rotationQuaternion, rawTargetRot, POSE_SMOOTH_FACTOR);
+                // Apply Exponential Moving Average (EMA) Pose Smoothing (0.15 for rock-solid stability)
+                const POSE_SMOOTH = 0.15;
+                markerRoot.position = BABYLON.Vector3.Lerp(markerRoot.position, rawTargetPos, POSE_SMOOTH);
+                markerRoot.rotationQuaternion = BABYLON.Quaternion.Slerp(markerRoot.rotationQuaternion, rawTargetRot, POSE_SMOOTH);
 
                 markerRoot.setEnabled(true);
                 isMarkerTrackedInWebcam = true;
