@@ -1201,10 +1201,10 @@
             const screenH = window.innerHeight;
 
             // Check depth and frustum conditions
-            const isBehindCamera = projected.z < 0 || projected.z > 1.0;
+            const isBehindCamera = projected.z < -0.5 || projected.z > 2.0;
             const isOnScreen = !isBehindCamera &&
-                               (screenX >= -50 && screenX <= screenW + 50) &&
-                               (screenY >= -50 && screenY <= screenH + 50);
+                               (screenX >= -100 && screenX <= screenW + 100) &&
+                               (screenY >= -100 && screenY <= screenH + 100);
 
             // Calculate approximate model bounding radius on screen (in pixels)
             const offsetPos = markerRoot.position.add(new BABYLON.Vector3(0, 0.15, 0));
