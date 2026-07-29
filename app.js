@@ -635,16 +635,10 @@
             console.log(`Video dimensions ready: ${videoElem.videoWidth}x${videoElem.videoHeight}. Loading ARCameraParam...`);
             
             function initARControllerWithParam(paramInstance) {
-                const rawW = videoElem.videoWidth || 640;
-                const rawH = videoElem.videoHeight || 480;
+                const vW = videoElem.videoWidth || 640;
+                const vH = videoElem.videoHeight || 480;
 
-                // ARToolKit camera_para.dat is calibrated for landscape aspect ratio (640x480).
-                // Passing portrait dimensions (720x1280) distorts focal length matrix by 2.37x,
-                // inflating Z depth to 119m. Always use landscape orientation dimensions (Max x Min):
-                const vW = Math.max(rawW, rawH);
-                const vH = Math.min(rawW, rawH);
-
-                console.log(`Creating ARController with landscape dimensions ${vW}x${vH} (raw: ${rawW}x${rawH})...`);
+                console.log(`Creating ARController with 1-to-1 video stream dimensions ${vW}x${vH}...`);
                 if (paramInstance) {
                     arController = new window.ARController(vW, vH, paramInstance);
                 } else {
@@ -675,15 +669,16 @@
                 });
             }
 
-            let cameraParam = new window.ARCameraParam();
-            cameraParam.onload = function() {
-                initARControllerWithParam(this || cameraParam);
-            };
-            cameraParam.onerror = function(err) {
-                console.warn("ARCameraParam load notice, using default camera parameters:", err);
-                initARControllerWithParam(null);
-            };
-            cameraParam.load('camera_para.dat');
+            let cameraParam = new window.ARCameraParam(
+                'camera_para.dat',
+                function() {
+                    initARControllerWithParam(this);
+                },
+                function(err) {
+                    console.warn("ARCameraParam load notice, using default camera parameters:", err);
+                    initARControllerWithParam(null);
+                }
+            );
         } catch (e) {
             console.warn("Failed to initialize ARToolKit optical tracker:", e);
             captureLog('warn', ["ARToolKit init error: " + (e.message || e)]);
@@ -790,11 +785,13 @@
                 // Align 3D hologram flat on desk horizontal plane (90deg X rotation offset)
                 rawTargetRot.multiplyInPlace(alignX90);
 
-                // Outlier jump rejection: reject single-frame pose teleports (> 1.50m)
-                const distJump = BABYLON.Vector3.Distance(markerRoot.position, rawTargetPos);
-                if (!isMarkerTrackedInWebcam || distJump < 1.50) {
-                    detectedInThisFrame = true;
-                    markerHoldCounter = MAX_HOLD_FRAMES;
+                // Filter out quad solver depth anomalies (Z depth must be within 0.10m - 2.50m)
+                if (rawTargetPos.z >= 0.10 && rawTargetPos.z <= 2.50) {
+                    const distJump = BABYLON.Vector3.Distance(markerRoot.position, rawTargetPos);
+                    if (!isMarkerTrackedInWebcam || distJump < 1.50) {
+                        detectedInThisFrame = true;
+                        markerHoldCounter = MAX_HOLD_FRAMES;
+                    }
                 }
             }
 
@@ -1522,15 +1519,21 @@
         copyBtn?.addEventListener('click', () => {
             const fullReport = getDiagnosticTelemetryReport();
             
-            // Also populate text box in case user wants to manually select
-            if (textExportBox) textExportBox.value = fullReport;
+            // Populate export text box and select all content for mobile Safari fallback
+            if (textExportBox) {
+                textExportBox.value = fullReport;
+                textExportBox.style.display = 'block';
+                textExportBox.focus();
+                textExportBox.select();
+                textExportBox.setSelectionRange(0, 999999);
+            }
 
             const notifyCopied = () => {
-                copyBtn.textContent = 'Copied!';
-                setTimeout(() => { copyBtn.textContent = '📋 Copy Telemetry'; }, 2000);
+                copyBtn.textContent = 'Copied to Clipboard! ✅';
+                setTimeout(() => { copyBtn.textContent = '📋 Copy Telemetry'; }, 2500);
             };
 
-            // Modern navigator.clipboard API
+            // Modern navigator.clipboard API with iOS fallback
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(fullReport).then(() => {
                     notifyCopied();
@@ -1545,16 +1548,11 @@
         function executeFallbackCopy(text, onSuccess) {
             const textArea = document.createElement('textarea');
             textArea.value = text;
+            textArea.contentEditable = 'true';
+            textArea.readOnly = false;
             textArea.style.position = 'fixed';
-            textArea.style.top = '0';
-            textArea.style.left = '0';
-            textArea.style.width = '2em';
-            textArea.style.height = '2em';
-            textArea.style.padding = '0';
-            textArea.style.border = 'none';
-            textArea.style.outline = 'none';
-            textArea.style.boxShadow = 'none';
-            textArea.style.background = 'transparent';
+            textArea.style.top = '-9999px';
+            textArea.style.left = '-9999px';
             document.body.appendChild(textArea);
             textArea.focus();
             textArea.select();
@@ -1564,12 +1562,7 @@
                 const successful = document.execCommand('copy');
                 if (successful && onSuccess) onSuccess();
             } catch (err) {
-                console.warn("Fallback copy failed on iOS:", err);
-                if (textExportBox) {
-                    textExportBox.style.display = 'block';
-                    textExportBox.select();
-                    textExportBox.setSelectionRange(0, 999999);
-                }
+                console.warn("Fallback copy notice on iOS:", err);
             }
             document.body.removeChild(textArea);
         }
