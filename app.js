@@ -95,10 +95,32 @@
     let isTrackingActive = false;
     let selectedMarkerSizeMeters = 0.13; // Default 13cm target printout size
 
-    // Rolling 10-Second Frame Persistence Diagnostic State
+    // Rolling 10-Second Frame Persistence & 10Hz Pose/Sensor Diagnostic State
     const frameHistoryWindow = [];
+    const poseHistoryWindow = []; // Stores timestamped 10Hz pose & sensor samples
     let totalFramesProcessed = 0;
     let totalFramesDetected = 0;
+    let last10HzSampleTime = 0;
+
+    // Hardware Device Motion & Orientation Sensor State
+    let latestDeviceOrientation = { alpha: 0, beta: 0, gamma: 0 };
+    let latestDeviceMotion = { ax: 0, ay: 0, az: 0 };
+
+    if (typeof window !== 'undefined' && window.addEventListener) {
+        window.addEventListener('deviceorientation', (e) => {
+            latestDeviceOrientation.alpha = Math.round(e.alpha || 0);
+            latestDeviceOrientation.beta = Math.round(e.beta || 0);
+            latestDeviceOrientation.gamma = Math.round(e.gamma || 0);
+        }, true);
+
+        window.addEventListener('devicemotion', (e) => {
+            if (e.accelerationIncludingGravity) {
+                latestDeviceMotion.ax = (e.accelerationIncludingGravity.x || 0).toFixed(1);
+                latestDeviceMotion.ay = (e.accelerationIncludingGravity.y || 0).toFixed(1);
+                latestDeviceMotion.az = (e.accelerationIncludingGravity.z || 0).toFixed(1);
+            }
+        }, true);
+    }
 
     // DOM Element References
     const canvas = document.getElementById('renderCanvas');
@@ -788,6 +810,41 @@
                 frameHistoryWindow.shift();
             }
 
+            // 10Hz High-Frequency Pose & Sensor Sampling (Every 0.1s / 100ms)
+            const now = Date.now();
+            if (now - last10HzSampleTime >= 100) {
+                last10HzSampleTime = now;
+                
+                let pX = "N/A", pY = "N/A", pZ = "N/A";
+                let pitch = 0, yaw = 0, roll = 0;
+                const isCurrentlyTracked = (detectedInThisFrame || markerHoldCounter > 0);
+
+                if (isCurrentlyTracked && markerRoot) {
+                    pX = markerRoot.position.x.toFixed(3);
+                    pY = markerRoot.position.y.toFixed(3);
+                    pZ = markerRoot.position.z.toFixed(3);
+                    if (markerRoot.rotationQuaternion) {
+                        const e = markerRoot.rotationQuaternion.toEulerAngles();
+                        pitch = Math.round(BABYLON.Tools.ToDegrees(e.x));
+                        yaw = Math.round(BABYLON.Tools.ToDegrees(e.y));
+                        roll = Math.round(BABYLON.Tools.ToDegrees(e.z));
+                    }
+                }
+
+                poseHistoryWindow.push({
+                    t: now,
+                    tracked: isCurrentlyTracked,
+                    x: pX, y: pY, z: pZ,
+                    pitch, yaw, roll,
+                    gyro: { ...latestDeviceOrientation },
+                    accel: { ...latestDeviceMotion }
+                });
+
+                if (poseHistoryWindow.length > 100) { // Keep 100 samples (10 seconds at 10Hz)
+                    poseHistoryWindow.shift();
+                }
+            }
+
             if (detectedInThisFrame || markerHoldCounter > 0) {
                 if (!detectedInThisFrame) {
                     markerHoldCounter--; // Hold pose during brief frame drops
@@ -1349,6 +1406,23 @@
             glPixelStatusStr = "Pixel Inspection Unavailable";
         }
 
+        // Format 10Hz High-Frequency 10-Second Sensor & Pose Timeline (Every 0.1s = 100 samples)
+        let poseHistoryLogBlock = "No Pose History Recorded";
+        if (poseHistoryWindow.length > 0) {
+            const sampled = [];
+            const startTime = poseHistoryWindow[0].t;
+            for (let i = 0; i < poseHistoryWindow.length; i++) {
+                const s = poseHistoryWindow[i];
+                const sec = ((s.t - startTime) / 1000).toFixed(1);
+                if (s.tracked) {
+                    sampled.push(`  [T+${sec}s] 3D-Pose: (X:${s.x}, Y:${s.y}, Z:${s.z}m | Rot: P:${s.pitch}°, Y:${s.yaw}°, R:${s.roll}°) | Gyro: (α:${s.gyro.alpha}°, β:${s.gyro.beta}°, γ:${s.gyro.gamma}°) | Accel: (${s.accel.ax}, ${s.accel.ay}, ${s.accel.az} m/s²)`);
+                } else {
+                    sampled.push(`  [T+${sec}s] [SEARCHING] | Gyro: (α:${s.gyro.alpha}°, β:${s.gyro.beta}°, γ:${s.gyro.gamma}°) | Accel: (${s.accel.ax}, ${s.accel.ay}, ${s.accel.az} m/s²)`);
+                }
+            }
+            poseHistoryLogBlock = sampled.join('\n');
+        }
+
         const reportHeader = [
             "=== CO-LOCATED SHARED AR DIAGNOSTIC TELEMETRY ===",
             `Timestamp: ${new Date().toISOString()}`,
@@ -1368,6 +1442,9 @@
             `10-Sec Frame Persistence: ${framePersistenceStr}`,
             `10-Sec Tracking Sparkline: [${sparklineStr}] (█ = Tracked, ░ = Dropped)`,
             `Clock Sync Offset: ${timeOffset}ms | Network RTT: ${timeSyncLatency}ms`,
+            "--------------------------------------------------",
+            "10Hz HIGH-FREQUENCY SENSOR & POSE TIMELINE (Every 0.1s for 10 Seconds):",
+            poseHistoryLogBlock,
             "--------------------------------------------------",
             "SYSTEM LOG HISTORY:"
         ].join('\n');
