@@ -1,16 +1,18 @@
 # Co-Located Multi-User Cross-Platform Shared AR
 
-> A static, serverless WebXR application built with Babylon.js that synchronizes 3D augmented reality animations across multiple co-located devices in real time using **deterministic time-based animation loops** and **optical image marker anchor alignment**.
+> A static, serverless WebXR and WebCam AR application built with Babylon.js and JSARToolKit5 that synchronizes 3D augmented reality holograms across multiple co-located devices in real time using **deterministic time-based animation loops** and **optical fiducial marker tracking**.
 
 ---
 
 ## 🌟 Overview
 
-**MultiUserCrossPlatformAR** demonstrates co-located Shared AR on a static website (hostable directly via GitHub Pages) without relying on WebRTC peer-to-peer data channels, WebSockets, or real-time signaling servers. 
+**MultiUserCrossPlatformAR** demonstrates co-located Shared AR on a static website (hostable directly via GitHub Pages) without relying on WebRTC peer-to-peer data channels, WebSockets, or real-time signaling servers.
 
 By combining:
 1. **Precision Network Time Synchronization (NTP-like algorithm)** to establish a unified global clock across all devices,
-2. **WebXR Optical Image Tracking** to establish a shared $(0,0,0)$ spatial origin in physical space, and
+2. **Dual-Engine Spatial Anchor Tracking**:
+   - **Native WebXR Mode**: Uses WebXR Image Tracking API on Android Chrome, Quest, and VisionOS.
+   - **Live WebCam AR Mode**: Uses **JSARToolKit5** (Emscripten WebAssembly ARToolKit v5 core) on iOS Mobile Safari and Brave.
 3. **Closed-Form Mathematical Motion Functions** driven strictly by absolute synchronized timestamps $t$,
 
 every participating device independently renders the identical 3D animation phase, position, rotation, particle effect, and HSL color state with sub-frame accuracy.
@@ -20,12 +22,18 @@ every participating device independently renders the identical 3D animation phas
 ## 🚀 Key Features
 
 * **Zero-Backend Shared AR Sync**: Eliminates infrastructure costs, server latency, and WebRTC pairing overhead by using mathematical determinism for state synchronization.
+* **Dual-Engine Cross-Platform Support**:
+  - **Native WebXR AR**: 6DOF passthrough with native hardware image tracking.
+  - **iOS WebCam AR**: Full optical marker tracking on Mobile Safari & Brave using WebGL transparent alpha compositing.
 * **Network Clock Offset Compensation**: Computes local device clock drift relative to UTC server time using network Round-Trip Time (RTT) jitter filtering.
-* **Spatial Marker Anchor Alignment**: Uses Babylon.js `WebXRImageTracking` to locate `marker.png` (20cm target width) and anchor the origin transform node (`markerRoot`) to the physical world.
+* **Fiducial Printout Marker Scale Presets**: Supports configurable printout target marker scales (**10cm | 13cm (Default) | 15cm | 20cm**).
 * **Deterministic 3D Holographic Artifact**: Renders a complex polyhedral core, dual gyroscopic rings, orbiting tetrahedron satellites, and a high-density particle flare system.
-* **iOS Platform Gating**: Automatically detects Mobile Safari on iOS/iPadOS and renders a dark-mode modal directing users to WebXR-enabled browsers (e.g., Mozilla WebXR Viewer) with one-touch URL copying.
-* **Desktop & Non-AR Fallback**: Gracefully degrades to an interactive 3D orbit preview on desktop and non-AR browsers.
-* **Custom AR Marker Generator**: Includes a standalone Python script (`generate_marker.py`) to generate asymmetric, high-contrast optical tracking target images.
+* **Comprehensive Diagnostic Telemetry Suite**:
+  - **Real-Time Viewport Projection**: Calculates 2D screen coordinates and pixel render diameter.
+  - **WebGL Hardware Pixel Sampler**: Uses `gl.readPixels()` to verify active 3D pixel rendering over the live camera feed.
+  - **10-Sec Tracking Persistence Sparkline**: Displays a rolling frame-tracking persistence percentage and visual sparkline (`[████████████████████]`).
+  - **10Hz High-Frequency Sensor & Pose Timeline**: Records 100 timestamped samples per 10-second test window (3D Pose $X,Y,Z$, 3D Rotation, Hardware Gyroscope $\alpha,\beta,\gamma$, and IMU Accelerometer $a_x,a_y,a_z$).
+  - **iOS Safari Clipboard Exporter**: One-touch clipboard exporter with WebKit fallback for iOS Safari.
 
 ---
 
@@ -71,64 +79,66 @@ All rendering logic inside `scene.onBeforeRenderObservable` uses $t$ as the sole
 
 ## 🛠 Project Structure
 
-```
+```text
 MultiUserCrossPlatformAR/
-├── index.html          # Minimal HTML5 entry point with WebXR & CSS links
-├── style.css           # Glassmorphism design system & platform modal styles
-├── app.js              # Platform gating, time sync, 3D scene, & WebXR tracking
-├── marker.png          # High-contrast 512x512 optical tracking target
+├── index.html          # HTML5 entry point with Babylon.js & JSARToolKit5 script tags
+├── style.css           # Glassmorphism UI, status badges, and diagnostic modal styles
+├── app.js              # Time sync, 3D scene, dual WebXR/JSARToolKit engine & telemetry
+├── artoolkit.min.js    # JSARToolKit5 Emscripten WebAssembly computer vision library
+├── camera_para.dat     # Intrinsic camera parameters matrix file for JSARToolKit5
+├── marker.patt         # Compiled optical pattern template for pattern ID 0
+├── marker.png          # High-contrast 512x512 printable optical tracking marker image
 ├── generate_marker.py  # Python script to regenerate custom AR tracking marker
-└── README.md           # Project architecture and technical documentation
+└── README.md           # Technical architecture and documentation
 ```
 
 ---
 
 ## 💻 Hardware & Browser Compatibility
 
-| Platform / Device | Browser | WebXR AR Mode | Fallback / Behavior |
+| Platform / Device | Browser | Tracking Mode | Engine / Behavior |
 | :--- | :--- | :---: | :--- |
-| **Android** | Google Chrome | ✅ Supported | Native Immersive WebXR AR + Image Tracking |
-| **Meta Quest 2/3/Pro** | Meta Quest Browser | ✅ Supported | Native Pass-through WebXR AR |
-| **iOS / iPadOS** | Mobile Safari | 📷 WebCam AR Mode | Live Rear-Camera Feed + Time-Synced Hologram |
-| **Desktop PC / Mac** | Chrome / Firefox / Edge | ℹ️ Preview | Interactive 3D Orbit Camera Mode |
+| **iOS / iPadOS** | Mobile Safari / Brave | 📷 **WebCam AR Mode** | **JSARToolKit5** WebAssembly optical marker tracking over live rear-camera stream |
+| **Android** | Google Chrome | ✅ **Native WebXR AR** | Native Immersive WebXR AR + Image Tracking (ARCore) |
+| **Meta Quest 2/3/Pro** | Meta Quest Browser | ✅ **Native WebXR AR** | Native Passthrough WebXR AR |
+| **Desktop PC / Mac** | Chrome / Safari / Firefox | ℹ️ **Interactive Preview** | Orbit camera 3D preview |
 
-> 💡 **iOS & GitHub Pages Support**: Standard iOS Mobile Safari restricts native WebXR (`navigator.xr`). This application automatically detects iOS and activates **Live WebCam AR Mode** directly in Safari, using the rear camera stream and device orientation while maintaining 100% synchronized clock and animation phase across all devices!
+---
+
+## 📐 Measuring Printout Marker Size
+
+When printing or displaying the optical marker, measure the **straight side length (Width or Height)** of the outer black square with a ruler (do **NOT** measure the diagonal/hypotenuse):
+
+```text
+    ┌───────────────────────────┐
+    │     ◄── WIDTH (cm) ──►    │
+    │   ┌───────────────────┐   │
+    │   │  ■■■■■■■■■■■■■■   │   │ ▲
+    │   │  ■   PATTERN   ■  │   │ HEIGHT (cm)
+    │   │  ■■■■■■■■■■■■■■   │   │ ▼
+    └───────────────────────────┘
+```
+
+Select the matching preset size button in the HUD:
+- **10cm** (~3.9 in)
+- **13cm (Default)** (~5.1 in)
+- **15cm** (~5.9 in)
+- **20cm** (~7.9 in)
 
 ---
 
 ## 🚦 Getting Started
 
 ### 1. Host or Serve the Project
-Because WebXR requires a secure context (`https://`), host the project on **GitHub Pages** or run a local HTTPS server:
+Serve the project over HTTPS (or host directly via **GitHub Pages**):
 
 ```bash
-# Option 1: Python HTTP Server (Local development)
+# Local development server
 python3 -m http.server 8000
 ```
-*(Note: To test WebXR on mobile devices, use HTTPS via ngrok, Cloudflare Tunnel, or host on GitHub Pages).*
 
-### 2. Print or Display the Marker
-1. Open the app on desktop or click **"📷 Display / Print AR Marker"** in the HUD.
-2. Display `marker.png` on a secondary screen or print it on paper (target dimensions: 20cm x 20cm).
-
-### 3. Launch Shared AR Session
-1. Open the site URL on multiple WebXR-compatible mobile devices (Android Chrome or iOS WebXR browser).
-2. Tap **"START AR"** (or point camera at the target marker).
-3. Observe all devices rendering the exact same floating 3D holographic structure in synchronized phase in the same physical space.
-
----
-
-## 🐍 Generating Custom Optical Markers
-
-To modify or regenerate the high-contrast asymmetric optical tracking marker:
-
-```bash
-# Install dependencies
-pip install Pillow
-
-# Run marker generator script
-python3 generate_marker.py
-```
-
-This updates `marker.png` with corner feature points and asymmetric geometric density for optimal WebXR tracking stability.
-
+### 2. Launch Session
+1. Open the website URL on multiple devices (iPhone / Android / Desktop).
+2. Tap **📷 START WEBCAM AR** (or **START WEBXR AR**).
+3. Point the camera at the printed 13cm marker.
+4. Observe all devices rendering the exact same floating 3D holographic structure in synchronized phase in the same physical space.
