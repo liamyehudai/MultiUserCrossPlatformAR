@@ -777,20 +777,19 @@
                 // Set Z depth positive (+Z) for Babylon camera coordinate space (in front of camera lens)
                 rawTargetPos.z = Math.abs(rawTargetPos.z);
 
-                // 1. Align ARToolKit +Z marker normal to Babylon +Y surface normal (laying flat on paper)
-                rawTargetRot.multiplyInPlace(alignX90);
-
-                // 2. If mobile camera stream is in portrait orientation (videoWidth < videoHeight),
-                // rotate around surface normal Y axis to align portrait orientation while keeping model 100% flat on paper!
+                // Pre-multiply portrait screen space rotation (-90deg around Z in camera space)
                 if (videoElem.videoWidth < videoElem.videoHeight) {
                     const origX = rawTargetPos.x;
                     const origY = rawTargetPos.y;
                     rawTargetPos.x = -origY;
                     rawTargetPos.y = origX;
 
-                    const alignPortraitY = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, -Math.PI / 2);
-                    rawTargetRot.multiplyInPlace(alignPortraitY);
+                    const alignPortraitZ = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Z, -Math.PI / 2);
+                    rawTargetRot = alignPortraitZ.multiply(rawTargetRot);
                 }
+
+                // Post-multiply X+90 rotation to map marker normal to Babylon ground plane (+Y UP)
+                rawTargetRot = rawTargetRot.multiply(alignX90);
 
                 // Filter out quad solver depth anomalies (Z depth must be within 0.10m - 2.50m)
                 if (rawTargetPos.z >= 0.10 && rawTargetPos.z <= 2.50) {
