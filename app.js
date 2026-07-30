@@ -645,12 +645,15 @@
                     arController = new window.ARController(vW, vH);
                 }
 
-                if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_COLOR_AND_MATRIX !== undefined) {
-                    arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR_AND_MATRIX);
-                } else if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR !== undefined) {
-                    arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_MONO_AND_COLOR);
+                if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_MONO !== undefined) {
+                    arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_MONO);
                 } else if (window.artoolkit && window.artoolkit.AR_TEMPLATE_MATCHING_COLOR !== undefined) {
                     arController.setPatternDetectionMode(window.artoolkit.AR_TEMPLATE_MATCHING_COLOR);
+                }
+
+                // Explicitly set 50% border pattern ratio for ARToolKit template matching
+                if (typeof arController.setPattRatio === 'function') {
+                    arController.setPattRatio(0.50);
                 }
 
                 // Sync JSARToolKit camera intrinsic projection matrix to Babylon active camera
@@ -744,7 +747,7 @@
                 // Strict pattern match for registered marker.patt (trackedMarkerId = 0, cfPatt >= 0.50)
                 const isPattMatch = (trackedMarkerId !== null && trackedMarkerId >= 0 && 
                     (markerInfo.idPatt === trackedMarkerId || markerInfo.id === trackedMarkerId));
-                const confidenceOK = (markerInfo.cfPatt !== undefined && markerInfo.cfPatt > 0) ? (markerInfo.cfPatt >= 0.50) : (cf >= 0.50);
+                const confidenceOK = (markerInfo.cfPatt !== undefined && markerInfo.cfPatt > 0) ? (markerInfo.cfPatt >= 0.35) : (cf >= 0.35);
 
                 const isMatch = isPattMatch && confidenceOK;
 
