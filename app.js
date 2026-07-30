@@ -788,9 +788,6 @@
                     rawTargetRot = alignPortraitZ.multiply(rawTargetRot);
                 }
 
-                // Post-multiply X+90 rotation to map marker normal to Babylon ground plane (+Y UP)
-                rawTargetRot = rawTargetRot.multiply(alignX90);
-
                 // Filter out quad solver depth anomalies (Z depth must be within 0.10m - 2.50m)
                 if (rawTargetPos.z >= 0.10 && rawTargetPos.z <= 2.50) {
                     const distJump = BABYLON.Vector3.Distance(markerRoot.position, rawTargetPos);
