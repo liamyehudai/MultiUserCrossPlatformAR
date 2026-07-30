@@ -419,7 +419,7 @@
 
         // Master Spatial Anchor Node (Origin (0,0,0) attached to detected marker)
         markerRoot = new BABYLON.TransformNode("markerRoot", scene);
-        markerRoot.scaling = new BABYLON.Vector3(0.5, 0.5, 0.5);
+        markerRoot.scaling = new BABYLON.Vector3(0.125, 0.125, 0.125);
 
         // Grid Base Plane anchored at marker
         const gridGround = BABYLON.MeshBuilder.CreateGround("gridGround", { width: 0.8, height: 0.8 }, scene);
