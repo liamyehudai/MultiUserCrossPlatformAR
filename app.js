@@ -656,6 +656,11 @@
                     arController.setPattRatio(0.50);
                 }
 
+                // Enable Adaptive Thresholding for room lighting invariance
+                if (window.artoolkit && window.artoolkit.AR_LABELING_THRESH_MODE_AUTO_ADAPTIVE !== undefined && typeof arController.setThresholdMode === 'function') {
+                    arController.setThresholdMode(window.artoolkit.AR_LABELING_THRESH_MODE_AUTO_ADAPTIVE);
+                }
+
                 // Sync JSARToolKit camera intrinsic projection matrix to Babylon active camera
                 updateWebCamCameraProjection();
 
@@ -727,10 +732,6 @@
         const videoElem = document.getElementById('webcamVideoBg');
         if (!videoElem || videoElem.readyState < 2) return;
 
-        // Skip processing duplicate frames if WebKit camera video decoder has not advanced
-        if (videoElem.currentTime === lastVideoFrameTime) return;
-        lastVideoFrameTime = videoElem.currentTime;
-
         try {
             arController.process(videoElem);
             const markerNum = arController.getMarkerNum();
@@ -744,12 +745,10 @@
                 const cf = (markerInfo.cfPatt !== undefined && markerInfo.cfPatt > 0) ? markerInfo.cfPatt : 
                            ((markerInfo.cf !== undefined && markerInfo.cf > 0) ? markerInfo.cf : 0.5);
 
-                // Strict pattern match for registered marker.patt (trackedMarkerId = 0, cfPatt >= 0.50)
                 const isPattMatch = (trackedMarkerId !== null && trackedMarkerId >= 0 && 
-                    (markerInfo.idPatt === trackedMarkerId || markerInfo.id === trackedMarkerId));
-                const confidenceOK = (markerInfo.cfPatt !== undefined && markerInfo.cfPatt > 0) ? (markerInfo.cfPatt >= 0.35) : (cf >= 0.35);
+                    (markerInfo.idPatt === trackedMarkerId || markerInfo.id === trackedMarkerId || markerInfo.idPatt >= 0));
 
-                const isMatch = isPattMatch && confidenceOK;
+                const isMatch = isPattMatch && (cf >= 0.15);
 
                 if (isMatch && cf > highestConfidence) {
                     highestConfidence = cf;
