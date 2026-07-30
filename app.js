@@ -788,6 +788,10 @@
                     rawTargetRot = alignPortraitZ.multiply(rawTargetRot);
                 }
 
+                // Add +90deg X pitch rotation to offset the -90deg camera pitch, resulting in Pitch = 0deg (100% FLAT ON DESK)
+                const alignPitchToZero = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.X, Math.PI / 2);
+                rawTargetRot = alignPitchToZero.multiply(rawTargetRot);
+
                 // Filter out quad solver depth anomalies (Z depth must be within 0.10m - 2.50m)
                 if (rawTargetPos.z >= 0.10 && rawTargetPos.z <= 2.50) {
                     const distJump = BABYLON.Vector3.Distance(markerRoot.position, rawTargetPos);
